@@ -12,15 +12,16 @@ export async function GET(
         const { id } = await params;
 
         // Verify Authentication
-        const supabase = await createClient();
-        const { data: { user } } = await supabase.auth.getUser();
+        // TEMPORARILY DISABLED for mobile app testing
+        // const supabase = await createClient();
+        // const { data: { user } } = await supabase.auth.getUser();
 
-        if (!user) {
-            return NextResponse.json(
-                { error: 'You must be logged in to check generation status.' },
-                { status: 401 }
-            );
-        }
+        // if (!user) {
+        //     return NextResponse.json(
+        //         { error: 'You must be logged in to check generation status.' },
+        //         { status: 401 }
+        //     );
+        // }
 
         // Initialize the Replicate client
         const replicate = new Replicate({

@@ -1,0 +1,61 @@
+{
+  "expo": {
+    "name": "Virtual Try-On",
+    "slug": "ai-vto-mobile",
+    "scheme": "aivtomobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#000000"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.fedakar.virtualtryon",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Virtual Try-On uses your camera to take photos of yourself for virtual clothing try-on.",
+        "NSPhotoLibraryUsageDescription": "Virtual Try-On accesses your photo library to select photos of yourself and garments for virtual try-on.",
+        "NSPhotoLibraryAddUsageDescription": "Virtual Try-On saves generated try-on images to your photo library."
+      }
+    },
+    "android": {
+      "package": "com.fedakar.virtualtryon",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#000000"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Virtual Try-On accesses your photos to select garments and personal photos for virtual try-on.",
+          "cameraPermission": "Virtual Try-On uses your camera to take photos for virtual try-on."
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": ""
+      }
+    }
+  }
+}
