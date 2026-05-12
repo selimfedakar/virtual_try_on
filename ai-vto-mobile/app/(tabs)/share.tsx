@@ -28,8 +28,10 @@ const HASHTAGS = '#OOTD #VirtualTryOn #FashionTech #StyleInspo #OutfitCheck #AIF
 export default function ShareScreen() {
   const [tryOns, setTryOns] = useState<Generation[]>([]);
   const [loadingList, setLoadingList] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [selected, setSelected] = useState<Generation | null>(null);
   const [isSharing, setIsSharing] = useState(false);
+  const [caption] = useState(() => CAPTIONS[Math.floor(Math.random() * CAPTIONS.length)]);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -39,22 +41,26 @@ export default function ShareScreen() {
 
   const loadTryOns = async () => {
     setLoadingList(true);
+    setLoadError(false);
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from('generations')
           .select('id, generated_image_url, created_at')
           .eq('user_id', user.id)
           .order('created_at', { ascending: false })
           .limit(20);
+        if (error) throw error;
         if (data) {
           const valid = data.filter((g: Generation) => g.generated_image_url);
           setTryOns(valid);
           if (valid.length > 0 && !selected) setSelected(valid[0]);
         }
       }
-    } catch {}
+    } catch {
+      setLoadError(true);
+    }
     setLoadingList(false);
   };
 
@@ -62,7 +68,6 @@ export default function ShareScreen() {
     if (!selected) return;
     setIsSharing(true);
     try {
-      const caption = CAPTIONS[Math.floor(Math.random() * CAPTIONS.length)];
       await Share.share({
         message: `${caption}\n\n${BRANDING_LINE}\n\n${HASHTAGS}`,
         url: selected.generated_image_url,
@@ -101,6 +106,15 @@ export default function ShareScreen() {
         {loadingList ? (
           <View style={styles.loadingRow}>
             <ActivityIndicator color="#ffffff" />
+          </View>
+        ) : loadError ? (
+          <View style={styles.emptyThumbRow}>
+            <Text style={styles.emptyThumbText}>
+              Failed to load try-ons. Check your connection and pull to retry.
+            </Text>
+            <TouchableOpacity onPress={loadTryOns} style={{ marginTop: 10 }}>
+              <Text style={{ color: '#4a90d0', fontSize: 13, fontWeight: '600' }}>Try Again</Text>
+            </TouchableOpacity>
           </View>
         ) : tryOns.length === 0 ? (
           <View style={styles.emptyThumbRow}>
@@ -163,7 +177,7 @@ export default function ShareScreen() {
           <View style={styles.captionPreview}>
             <Text style={styles.captionPreviewLabel}>INCLUDED CAPTION</Text>
             <Text style={styles.captionPreviewText}>
-              {CAPTIONS[0]}
+              {caption}
             </Text>
             <Text style={styles.captionPreviewBranding}>{BRANDING_LINE}</Text>
             <Text style={styles.captionPreviewHashtags}>{HASHTAGS}</Text>

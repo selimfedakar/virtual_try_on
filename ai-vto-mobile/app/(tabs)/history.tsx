@@ -26,6 +26,7 @@ export default function History() {
   const [generations, setGenerations] = useState<Generation[]>([]);
   const [garments, setGarments] = useState<SavedGarment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [tryOnError, setTryOnError] = useState(false);
   const [selected, setSelected] = useState<Generation | null>(null);
 
   useFocusEffect(
@@ -41,6 +42,7 @@ export default function History() {
   };
 
   const fetchTryOns = async () => {
+    setTryOnError(false);
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
@@ -48,12 +50,14 @@ export default function History() {
           .from('generations')
           .select('*')
           .eq('user_id', user.id)
-          .order('created_at', { ascending: false });
-        if (!error && data) {
-          setGenerations(data.filter((g: Generation) => g.generated_image_url));
-        }
+          .order('created_at', { ascending: false })
+          .limit(50);
+        if (error) throw error;
+        if (data) setGenerations(data.filter((g: Generation) => g.generated_image_url));
       }
-    } catch {}
+    } catch {
+      setTryOnError(true);
+    }
   };
 
   const fetchGarments = async () => {
@@ -109,7 +113,16 @@ export default function History() {
             <Text style={styles.sectionCount}>{generations.length}</Text>
           </View>
 
-          {generations.length === 0 ? (
+          {tryOnError ? (
+            <View style={styles.emptyBlock}>
+              <Text style={styles.emptyEmoji}>⚠️</Text>
+              <Text style={styles.emptyTitle}>Failed to load</Text>
+              <Text style={styles.emptySub}>Check your connection.</Text>
+              <TouchableOpacity onPress={fetchAll} style={{ marginTop: 10 }}>
+                <Text style={{ color: '#4a90d0', fontSize: 13, fontWeight: '600' }}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          ) : generations.length === 0 ? (
             <View style={styles.emptyBlock}>
               <Text style={styles.emptyEmoji}>👗</Text>
               <Text style={styles.emptyTitle}>No try-ons yet</Text>
