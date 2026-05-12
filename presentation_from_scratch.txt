@@ -1,0 +1,1099 @@
+================================================================================
+  VTO — VIRTUAL TRY-ON APP
+  FULL TECHNICAL DEEP DIVE / TAM TEKNİK DERINLIK ANALİZİ
+  by _fedakar | May 2026
+================================================================================
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ENGLISH VERSION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  1. WHAT IS VTO?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+VTO is an AI-powered Virtual Try-On application. You give it two images:
+  - A photo of a real person (yourself)
+  - A photo of a garment (a shirt, jacket, top)
+
+The AI model then generates a photorealistic output image showing that person
+wearing that specific garment — without any physical fitting room required.
+
+The product ships as TWO distinct clients sharing ONE backend:
+
+  [WEB APP]  →  Next.js 16 (App Router)  →  Deployed on Vercel
+  [MOBILE APP]  →  Expo / React Native  →  Published on App Store / Play Store
+  [BACKEND]  →  Supabase (PostgreSQL + Auth + Storage)
+  [AI MODEL]  →  IDM-VTON via Replicate API (cloud inference)
+
+This is a monorepo. Both clients live under the same git repository:
+  /ai-vto-app/                   ← Next.js web app root
+  /ai-vto-app/ai-vto-mobile/     ← Expo mobile app root
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  2. THE AI MODEL: IDM-VTON
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+The core of VTO is IDM-VTON (Improving Diffusion Models for Authentic
+Virtual Try-On in the Wild), a state-of-the-art research model originally
+published on arXiv in 2024 by researchers from KAIST and elsewhere.
+
+Model ID used:
+  cuuupid/idm-vton
+  Version: 0513734a452173b8173e907e3a59d19a36266e55b48528559432bd21c7d7e985
+
+Architecture summary:
+  IDM-VTON is built on top of a Stable Diffusion backbone. It extends the
+  latent diffusion model paradigm with two specialized mechanisms:
+
+  a) IP-Adapter-based garment encoder
+     The garment image is encoded through an IP-Adapter (Image Prompt Adapter)
+     which extracts semantic and visual features of the clothing item and
+     injects them into the cross-attention layers of the U-Net denoiser.
+     This allows the model to understand "what this garment looks like" at
+     a feature level — not just pixel matching.
+
+  b) Inpainting mask mechanism
+     IDM-VTON uses an inpainting approach. A binary mask defines the "to be
+     replaced" region on the person's body (the area currently occupied by
+     clothing). The model performs denoising only in that masked region,
+     preserving the background, face, and unmasked body areas intact.
+     - White pixels in the mask = region to be inpainted (clothing replaced)
+     - Black pixels = region to preserve
+
+  c) Garment description text prompt
+     The model optionally accepts a text description of the garment
+     (e.g., "A shirt", "Mobile Upload"). This text is encoded with CLIP and
+     used in the cross-attention conditioning alongside the visual features.
+     This improves semantic alignment between the generated clothing and the
+     text description.
+
+  d) Denoising steps
+     We call the model with steps=30, which is the standard quality setting
+     for Stable Diffusion — a balance between inference speed and output
+     quality. More steps = better quality but longer wait time.
+
+Input payload structure:
+  {
+    human_img: "data:image/jpeg;base64,...",  ← person photo as base64 data URI
+    garm_img:  "data:image/jpeg;base64,...",  ← garment photo as base64 data URI
+    garment_des: "Mobile Upload",             ← text description (CLIP conditioning)
+    category: "upper_body",                   ← body region target
+    crop: false,                              ← don't crop the output
+    steps: 30,                                ← denoising steps
+    mask_img: "data:image/png;base64,..."     ← optional inpainting mask
+  }
+
+The model is accessed via Replicate's cloud inference API. Replicate manages
+the GPU allocation, model loading, and output delivery — we never run the
+diffusion model locally.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  3. MEDIAPIPE SEGMENTATION (WEB APP — GARMENT MASK PIPELINE)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+The web app includes a client-side image segmentation pipeline using
+Google's MediaPipe Tasks Vision library.
+
+Model used:
+  selfie_multiclass_256x256 (TFLite float32)
+  Source: storage.googleapis.com/mediapipe-models/...
+
+This is a lightweight semantic segmentation model that runs ENTIRELY in the
+browser, executed on the GPU via WebAssembly + WebGL (delegate: "GPU").
+
+It outputs a per-pixel category mask with these class labels:
+  0 = background
+  1 = hair
+  2 = body-skin (arms, legs, chest)
+  3 = face-skin
+  4 = clothes
+  5 = (other)
+
+VTO uses two segmentation functions from this model:
+
+  extractSkinMask()
+    - Selects pixels where category = 2 (body-skin) or 3 (face-skin)
+    - Composites those pixels back onto a transparent canvas
+    - Output: a PNG with only the visible skin regions visible
+    - Use: for skin visibility / body presence detection
+
+  extractClothesMask()
+    - Selects pixels where category = 4 (clothes)
+    - Creates a binary mask: white=clothes region, black=everything else
+    - This is exactly what IDM-VTON expects as its mask_img input
+    - Use: to tell IDM-VTON "replace THIS region with the new garment"
+
+The pipeline:
+  1. User uploads person photo in web app
+  2. Browser runs MediaPipe segmentation on that image (GPU-accelerated)
+  3. Category mask is extracted → clothes pixels isolated → white/black mask
+  4. This mask is sent alongside the photo to the generate API endpoint
+  5. IDM-VTON uses it for targeted inpainting
+
+Why client-side? Running the segmentation in the browser means:
+  - Zero cost (no GPU server needed for segmentation)
+  - Sub-second latency (GPU inference on the user's device)
+  - Privacy (person's image never leaves the browser for this step)
+
+The mobile app currently does NOT send a mask (mask_img is optional) — IDM-VTON
+performs auto-segmentation fallback in that case. This is a known quality
+tradeoff: client-side mask generation improves output precision on web.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  4. THE ASYNC GENERATION PIPELINE (CORE FLOW)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+This is the most important engineering decision in the project. Generating
+an image with IDM-VTON takes ~20-40 seconds. You cannot keep an HTTP connection
+open that long — Vercel Serverless Functions time out at 60 seconds max, and
+mobile clients on mobile networks would suffer dropped connections.
+
+The solution: async job-based architecture with client-side polling.
+
+STEP 1 — JOB CREATION  [POST /api/generate]
+  - Client sends: person photo (base64), garment photo (base64), optional mask
+  - Server calls: replicate.predictions.create({ version, input })
+  - Replicate immediately returns a prediction object with:
+      { id: "abc123...", status: "starting" }
+  - Server returns this prediction ID to the client RIGHT AWAY
+  - Total server time: ~500ms (just creates the job, doesn't wait for it)
+
+STEP 2 — ASYNC PROCESSING  [Replicate infrastructure]
+  - Replicate allocates a GPU, loads IDM-VTON, runs the diffusion process
+  - Status progression: "starting" → "processing" → "succeeded" / "failed"
+  - This takes 20-40 seconds in the background, completely decoupled from
+    the client HTTP connection
+
+STEP 3 — CLIENT POLLING  [GET /api/predictions/{id}]
+  - Client polls every 3 seconds: up to 30 attempts (= 90 seconds max wait)
+  - Server calls: replicate.predictions.get(id)
+  - When status === "succeeded": extract the output URL and return it
+  - When status === "failed" or "canceled": throw an error
+  - When still "processing": return status, client waits and polls again
+
+STEP 4 — RESULT PERSISTENCE
+  - Client receives the Replicate CDN URL for the generated image
+  - Client fetches that image and uploads it to Supabase Storage (try-ons bucket)
+    Path: {userId}/{timestamp}.jpg
+  - Client saves a record to the generations table:
+      { user_id, base_image_url, garment_image_url, garment_title,
+        generated_image_url }
+  - The Replicate CDN URL is replaced with our permanent Supabase URL
+  - This is non-critical: if persistence fails, the image is still shown
+
+Constants used:
+  GENERATE_TIMEOUT_MS = 15,000  ← abort if POST /generate takes > 15s
+  POLL_INTERVAL_MS    = 3,000   ← poll every 3 seconds
+  POLL_MAX_ATTEMPTS   = 30      ← give up after 90 seconds total
+
+Error handling philosophy:
+  Network errors during polling (transient) are silently ignored.
+  Hard failures (prediction failed/canceled, explicit error messages) are
+  thrown and shown to the user. AbortError from timeout → shows "Connection
+  Failed" message. This prevents false negatives from temporary network blips.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  5. BACKEND: SUPABASE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Supabase provides: PostgreSQL database + Auth + Storage + Edge Functions (unused).
+
+DATABASE SCHEMA:
+
+  Table: public.profiles
+    id          UUID (FK → auth.users, PRIMARY KEY)
+    name        TEXT
+    height      TEXT
+    weight      TEXT
+    gender      TEXT DEFAULT 'Male'
+    avatar_url  TEXT
+    updated_at  TIMESTAMPTZ
+
+  Table: public.generations
+    id                   UUID (gen_random_uuid, PRIMARY KEY)
+    user_id              UUID (FK → auth.users, NOT NULL)
+    base_image_url       TEXT (= "saved_on_device" for mobile)
+    garment_image_url    TEXT (= "data_uri_omitted" for mobile)
+    garment_title        TEXT
+    generated_image_url  TEXT (permanent Supabase CDN URL)
+    created_at           TIMESTAMPTZ
+
+ROW LEVEL SECURITY (RLS):
+  All tables have RLS enabled. Policies ensure users can ONLY read/write
+  their own data. The uid() check is done at the database level — even if
+  a client tries to access another user's data, PostgreSQL rejects it.
+
+  generations:
+    SELECT: auth.uid() = user_id
+    INSERT: auth.uid() = user_id
+
+  profiles:
+    SELECT / INSERT / UPDATE: auth.uid() = id
+
+STORAGE BUCKETS:
+  try-ons (public)
+    Path structure: {user_id}/{timestamp}.jpg
+    Upload: authenticated users only, into their own folder
+    Read: public (CDN URLs work without auth)
+    Delete: authenticated users, their own files only
+
+  avatars (public)
+    Path structure: {user_id}/avatar.jpg
+    Same security model as try-ons
+    Uses upsert: true (overwrite on re-upload)
+
+TRIGGER: auto-create profile on signup
+  CREATE TRIGGER on_auth_user_created
+    AFTER INSERT ON auth.users
+    EXECUTE FUNCTION handle_new_user()
+
+  handle_new_user() inserts an empty profile row when a new auth user is
+  created. This means the profile row always exists after signup — no null
+  checks needed on profile queries.
+
+RPC: delete_user_data() — required by App Store guidelines
+  Deletes all generations and profile records for the authenticated user.
+  Called from the mobile app Profile screen when the user requests
+  account deletion. SECURITY DEFINER means it runs with elevated privileges
+  to delete from both tables in one atomic call.
+
+CLIENT INITIALIZATION:
+  Web app:
+    @supabase/ssr package — two clients:
+    - createBrowserClient() for client components (react state, event handlers)
+    - createServerClient() for server components and API routes (reads cookies)
+    This split is required because Next.js App Router runs components both
+    on the server (Node.js) and client (browser).
+
+  Mobile app:
+    @supabase/supabase-js standard client
+    Uses react-native-url-polyfill for URL API compatibility on React Native
+    AsyncStorage as the auth session persistence layer (instead of localStorage)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  6. NEXT.JS WEB APP ARCHITECTURE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Framework: Next.js 16 (App Router)
+Runtime: Node.js serverless on Vercel
+
+File structure (src/app/):
+  layout.tsx              ← Root layout, global metadata, fonts
+  page.tsx                ← Main single-page application
+  globals.css             ← Tailwind CSS v4 base styles
+  privacy/page.tsx        ← Privacy Policy page (App Store required)
+  api/generate/route.ts   ← POST: creates Replicate prediction job
+  api/predictions/[id]/route.ts  ← GET: polls Replicate job status
+  api/scrape/route.ts     ← POST: scrapes product page for garment data
+
+API ROUTE DESIGN:
+  All three routes use Edge-compatible patterns (NextResponse, async POST/GET).
+  maxDuration = 60 on generate and predictions routes, which is the maximum
+  allowed on Vercel's Hobby plan serverless functions.
+
+GARMENT SCRAPER (api/scrape):
+  Takes a product URL (e.g., from Zara, H&M, or any e-commerce site).
+  Uses the cheerio HTML parser to extract:
+    - Title: og:title → twitter:title → <title> → <h1>
+    - Image: og:image → twitter:image → first .product-image img
+    - Price: product:price:amount meta → .price / [class*="price"] selectors
+    - Relative image URLs are resolved to absolute using new URL(base).href
+
+  This allows users to paste a garment product URL and automatically populate
+  the garment picker with the product image and name.
+
+FRONTEND COMPONENTS:
+  HeroSection   ← Landing section with call-to-action
+  UploadSection ← Person photo upload with drag-and-drop
+  GarmentInput  ← Garment image via file upload OR URL scraping
+  ResultsView   ← Generated image display with download action
+  HistoryView   ← User's past generations fetched from Supabase
+  AuthModal     ← Sign In / Sign Up modal with Supabase auth
+
+DEPLOYMENT:
+  Hosted on Vercel. Build command: next build
+  .vercelignore excludes the ai-vto-mobile/ subdirectory so the mobile app
+  is not included in the Vercel build artifact.
+  Environment variables required:
+    NEXT_PUBLIC_SUPABASE_URL
+    NEXT_PUBLIC_SUPABASE_ANON_KEY
+    REPLICATE_API_TOKEN
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  7. EXPO REACT NATIVE MOBILE APP ARCHITECTURE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Framework: Expo SDK 54 + Expo Router v6
+React Native: 0.81.5 (New Architecture enabled — Fabric + JSI)
+Navigation: Expo Router (file-based routing, built on React Navigation v7)
+Build System: EAS (Expo Application Services)
+
+ROUTING STRUCTURE:
+  app/
+    _layout.tsx           ← Root layout: auth state listener, session guard
+    index.tsx             ← Entry redirect (→ auth or → tabs based on session)
+    auth.tsx              ← Sign In / Create Account screen
+    (tabs)/
+      _layout.tsx         ← Bottom tab bar layout (5 visible tabs)
+      home.tsx            ← Try-On screen (main feature)
+      analysis.tsx        ← Fit Analysis screen
+      history.tsx         ← My Closet (past generations)
+      stylist.tsx         ← AI Stylist (outfit suggestions)
+      share.tsx           ← Share & Analyze
+      profile.tsx         ← Profile Settings (href: null — excluded from tab bar)
+
+ROOT LAYOUT PATTERN:
+  The root _layout.tsx listens to supabase.auth.onAuthStateChange.
+  On SIGNED_IN → navigate to /(tabs)/home
+  On SIGNED_OUT → navigate to /auth
+  This ensures the auth gate is always enforced and the navigation state
+  always reflects the real auth state.
+
+PROFILE CONTEXT:
+  A React Context (ProfileContext) wraps the entire tab layout.
+  It fetches the user's profile from Supabase on mount and provides:
+    { profile, updateProfile() }
+  updateProfile() does an upsert to the profiles table and updates local state.
+  All tab screens can access profile data (height, weight, gender, avatar)
+  without individual database calls.
+
+LOCAL STORAGE LAYER:
+  Person photos are persisted locally on the device (not uploaded to Supabase).
+  Two utilities:
+    savedPhotos.ts — uses expo-file-system + AsyncStorage
+      Copies photos from temp picker URI → permanent documentDirectory
+      Maintains a list of up to 6 saved photos in AsyncStorage
+      Provides: getSavedPhotos(), savePhoto(), deletePhoto(), readPhotoAsBase64()
+
+    savedGarments.ts — similar pattern for garment photos
+      Auto-saves garments when picked for try-on (for the Closet screen)
+
+  Why this design? The person photos are sensitive (biometric-like data).
+  Keeping them on-device only means they never leave the user's phone.
+  The base_image_url in the database is literally "saved_on_device" — a
+  placeholder string, not an actual URL.
+
+  For generated images (the output): these ARE uploaded to Supabase Storage
+  because the user wants to keep them in their history and potentially share them.
+
+PHOTO-TO-BASE64 PIPELINE (mobile):
+  iOS/Android do not allow sending raw file:// URIs to a remote server.
+  The solution: expo-file-system reads the file and returns a base64 string.
+  This base64 string is then wrapped in a data URI:
+    "data:image/jpeg;base64," + base64String
+  and sent in the POST body to the Next.js backend.
+  This is the standard approach for image transmission in React Native.
+
+CAMERA ROLL SAVE:
+  expo-media-library is used to save generated try-on images back to the
+  device's photo library. Flow:
+    1. Request permissions (MediaLibrary.requestPermissionsAsync)
+    2. If granted: MediaLibrary.saveToLibraryAsync(url)
+    3. The URL must be an https:// URL (Supabase CDN) or local file:// URI
+  This satisfies the user expectation of "I generated this, now I want it
+  in my camera roll."
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  8. MOBILE APP SCREENS — FEATURE BREAKDOWN
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  [TAB 1] Try On (home.tsx) — the main feature
+    - Photo management: up to 6 saved photos, camera or gallery input
+    - Garment picker: gallery input, base64 captured inline
+    - Generate button: triggers the async pipeline described above
+    - Loading state: step messages + animated spinner + signature text
+    - Result screen: AR-style frame with scan line animation (Animated API),
+      glowing "LIVE PREVIEW" badge, "✓ FIT DETECTED" overlay
+    - Actions: "Try Another Outfit" (reset) + "Save to Camera Roll"
+
+  [TAB 2] Fit Analysis (analysis.tsx)
+    - Input: height (cm), weight (kg), gender (Male/Female/Other)
+    - All computation is 100% client-side (no API call):
+        BMI = weight / (height/100)²
+        Body type classification by BMI × gender matrix
+        Size recommendation by weight range (gender-specific tables)
+        The size result shows primary size with percentage confidence
+        and optionally a secondary adjacent size with its percentage
+    - Output: BMI card, size recommendation, body type, fit tips,
+      "works well for you" list, "might be tricky" list
+    - Measurements are persisted to the user's profile via ProfileContext
+      so they're pre-filled on next visit
+
+  [TAB 3] Closet (history.tsx)
+    - Fetches user's generations from Supabase (generated_image_url)
+    - Shows a grid of past try-on results
+    - Allows deleting individual generations (removes from DB + storage)
+
+  [TAB 4] AI Stylist (stylist.tsx)
+    - User picks a garment image from gallery
+    - Returns 3 curated outfit composition cards:
+        Casual Day Out, Smart Office Look, Night Out
+    - Each card includes: wear-with items, accessories, shoes, hair,
+      and a styling tip
+    - Currently uses static curated data (template-based suggestions)
+    - The 1.8-second loading simulation creates perceived AI processing
+
+  [TAB 5] Share (share.tsx)
+    - Share & Analyze functionality for generated looks
+
+  [HIDDEN] Profile (profile.tsx)
+    - Accessible via AppHeader avatar tap or side drawer
+    - Profile photo upload (camera or gallery → Supabase avatars bucket)
+    - Name, height, weight, gender editing
+    - Account deletion (calls delete_user_data() RPC + auth.signOut())
+    - Excluded from bottom tab bar via href: null (important UX decision:
+      profile is a utility screen, not a primary navigation destination)
+
+APP HEADER (AppHeader.tsx):
+  Persistent header present on all tab screens.
+  Left: hamburger → side drawer with full navigation
+  Center: "VTO" brand text
+  Right: avatar → profile quick menu (Profile Settings / Log Out)
+  Side drawer shows user avatar, all navigation items, and Log Out
+  Profile quick menu shows as a dropdown from the avatar position
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  9. EAS BUILD & APP STORE PIPELINE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+EAS (Expo Application Services) handles cloud-based native builds.
+
+  eas.json profiles:
+    development  → builds with Expo Dev Client for local testing
+    preview      → internal distribution for TestFlight-style testing
+    production   → App Store / Play Store release build (autoIncrement: true)
+
+App identifiers:
+  iOS Bundle ID:      com.fedakar.virtualtryon
+  Android Package:    com.fedakar.virtualtryon
+  EAS Project ID:     e7b7f796-f302-4f3f-8b4c-fa6e55c03531
+  EAS Owner:          selimfedakar
+
+Build command:    eas build --platform ios --profile production
+Submit command:   eas submit --platform ios
+
+App Store requirements met:
+  - Privacy policy: /privacy page on Vercel
+  - Account deletion: delete_user_data() RPC + profile screen
+  - Camera permission: NSCameraUsageDescription
+  - Photo library read: NSPhotoLibraryUsageDescription
+  - Photo library write: NSPhotoLibraryAddUsageDescription
+  - Android equivalents in AndroidManifest via app.json permissions array
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  10. FULL TECHNOLOGY STACK
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  AI / ML:
+    IDM-VTON (Stable Diffusion-based virtual try-on)
+    MediaPipe Tasks Vision (in-browser semantic segmentation, TFLite)
+    Replicate (cloud ML inference platform / GPU API)
+
+  Frontend — Web:
+    Next.js 16 (App Router, Server Components, Route Handlers)
+    React 19.2
+    TypeScript 5
+    Tailwind CSS v4
+    @supabase/ssr (SSR-compatible Supabase client)
+    @mediapipe/tasks-vision (browser ML inference)
+    cheerio (HTML scraping for garment data extraction)
+    lucide-react (icon library)
+    Vercel (deployment + CDN + Serverless Functions)
+
+  Frontend — Mobile:
+    Expo SDK 54 (New Architecture / Fabric renderer)
+    React Native 0.81.5
+    Expo Router v6 (file-based routing)
+    React 19.1
+    TypeScript 5.9
+    expo-image-picker (camera + gallery access)
+    expo-file-system (local file persistence)
+    expo-media-library (save to camera roll)
+    expo-blur (glassmorphism tab bar)
+    @react-native-async-storage/async-storage (local key-value store)
+    react-native-url-polyfill (URL API for Supabase on RN)
+    EAS (cloud builds + submission)
+
+  Backend / Infrastructure:
+    Supabase (PostgreSQL 15, Auth, Storage, Row Level Security)
+    Replicate API (model hosting + async job queue)
+
+  Development:
+    Git monorepo (web + mobile in same repo)
+    TypeScript across the full stack (zero-error strict mode)
+    ESLint (Next.js config)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  11. KEY ARCHITECTURAL DECISIONS & WHY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Q: Why not run IDM-VTON on your own server?
+  A: Running a Stable Diffusion model requires an A100/H100 GPU (>$2/hr).
+     Replicate charges per inference second — for a ~30 second generation,
+     cost is roughly $0.05-0.10. At small scale this is far cheaper than
+     always-on GPU infrastructure. Replicate also handles auto-scaling,
+     model versioning, and cold start management.
+
+  Q: Why async polling instead of WebSockets or SSE?
+  A: Replicate's API is job-based — there's no streaming endpoint for
+     image generation. Polling is the correct pattern here. WebSockets
+     would add connection management complexity for no benefit when
+     the client only needs to check a single status field every 3 seconds.
+
+  Q: Why Next.js as the backend-for-frontend (BFF)?
+  A: The REPLICATE_API_TOKEN must never be exposed to the client.
+     Next.js API routes run on the server (Node.js) and can access
+     server-side environment variables. The mobile app calls the
+     Next.js API — it never touches Replicate directly.
+     This pattern is called Backend-for-Frontend (BFF).
+
+  Q: Why keep person photos on-device only?
+  A: Person photos are biometric-adjacent data. Uploading them to a server
+     would require stronger data processing disclosure, stricter GDPR/privacy
+     compliance, and storage costs. By keeping them local and sending them
+     as base64 only during generation (not persisted), the architecture
+     minimizes personal data handling.
+
+  Q: Why Supabase over Firebase?
+  A: Supabase is PostgreSQL-native (proper relational schema, JOINs, RLS
+     policies at the SQL level). For a product that needs user authentication,
+     profile storage, AND a generations history with user_id foreign keys,
+     a relational model is the natural fit. Also: Supabase Storage provides
+     S3-compatible object storage with the same RLS policies as the database.
+
+  Q: Why monorepo?
+  A: The web and mobile apps share the Supabase schema, the same API endpoints,
+     and conceptually the same product. A monorepo means one git history,
+     shared environment variable documentation (.env.example), and easier
+     coordination of schema migrations. The Vercel deployment ignores the
+     mobile subdirectory via .vercelignore.
+
+
+================================================================================
+  TÜRKÇE VERSİYON
+================================================================================
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  1. VTO NEDİR?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+VTO, yapay zeka destekli bir Sanal Kıyafet Deneme (Virtual Try-On) uygulamasıdır.
+Kullanıcıdan iki görsel alır:
+  - Kendi fotoğrafı (kişi görseli)
+  - Denemek istediği kıyafetin fotoğrafı
+
+Yapay zeka modeli bu iki görseli birleştirerek o kişinin o kıyafeti giydiğini
+gösteren gerçekçi bir çıktı üretir — fiziksel bir prova kabini olmadan.
+
+Ürün iki farklı istemci üzerinden, tek bir backend'e bağlı olarak çalışır:
+
+  [WEB UYGULAMASI]   →  Next.js 16 (App Router)   →  Vercel'de yayında
+  [MOBİL UYGULAMA]   →  Expo / React Native        →  App Store / Play Store
+  [BACKEND]          →  Supabase (PostgreSQL + Auth + Storage)
+  [YAPAY ZEKA MODELİ] →  IDM-VTON via Replicate API (bulut inference)
+
+Proje monorepo yapısındadır. Her iki istemci aynı git deposunda yaşar:
+  /ai-vto-app/                   ← Next.js web uygulaması kökü
+  /ai-vto-app/ai-vto-mobile/     ← Expo mobil uygulama kökü
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  2. YAPAY ZEKA MODELİ: IDM-VTON
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+VTO'nun çekirdeği IDM-VTON'dur. Açılımı: "Improving Diffusion Models for
+Authentic Virtual Try-On in the Wild" — 2024'te arXiv'de yayınlanan,
+KAIST başta olmak üzere çeşitli kurumlardan araştırmacılar tarafından
+geliştirilen son teknoloji bir akademik modeldir.
+
+Kullandığımız model versiyonu:
+  cuuupid/idm-vton
+  Version hash: 0513734a452173b8173e907e3a59d19a36266e55b48528559432bd21c7d7e985
+
+MİMARİ AÇIKLAMA:
+
+  IDM-VTON, Stable Diffusion altyapısı üzerine inşa edilmiştir.
+  Latent diffusion model paradigmasını iki özel mekanizma ile genişletir:
+
+  a) IP-Adapter tabanlı kıyafet enkoderi
+     Kıyafet görseli, bir IP-Adapter (Image Prompt Adapter) üzerinden
+     geçirilerek kıyafetin görsel ve semantik özellikleri çıkarılır.
+     Bu özellikler, U-Net denoiser'ın cross-attention katmanlarına
+     enjekte edilir. Model böylece "bu kıyafet neye benziyor" sorusunu
+     özellik düzeyinde — sadece piksel eşleştirmesi değil, gerçek anlam
+     düzeyinde — yanıtlayabilir.
+
+  b) Inpainting mask mekanizması
+     IDM-VTON, inpainting yaklaşımı kullanır. İkili (binary) bir maske,
+     kişi fotoğrafında "değiştirilecek" bölgeyi (mevcut kıyafetin kapladığı
+     alan) tanımlar. Model gürültü gidermeyi (denoising) yalnızca bu maskeli
+     bölgede gerçekleştirir — arka plan, yüz ve maskelenmemiş beden bölgeleri
+     korunur.
+       - Beyaz piksel = inpaint edilecek bölge (kıyafetin yerleştirileceği yer)
+       - Siyah piksel = korunacak bölge
+
+  c) Kıyafet açıklama metni (text prompt)
+     Model isteğe bağlı olarak kıyafetin metin açıklamasını da alır
+     ("A shirt", "Mobile Upload" gibi). Bu metin CLIP ile encode edilir
+     ve görsel özelliklerle birlikte cross-attention koşullamasında kullanılır.
+     Üretilen kıyafetin semantik tutarlılığını artırır.
+
+  d) Denoising adımları
+     Modeli steps=30 ile çağırıyoruz — bu, Stable Diffusion için standart
+     kalite ayarıdır. Daha fazla adım = daha iyi kalite ama daha uzun bekleme.
+
+Giriş payload yapısı:
+  {
+    human_img: "data:image/jpeg;base64,...",   ← kişi fotoğrafı
+    garm_img:  "data:image/jpeg;base64,...",   ← kıyafet fotoğrafı
+    garment_des: "Mobile Upload",              ← CLIP text conditioning
+    category: "upper_body",                    ← hedef beden bölgesi
+    crop: false,                               ← çıktıyı kırpma
+    steps: 30,                                 ← denoising adım sayısı
+    mask_img: "data:image/png;base64,..."      ← isteğe bağlı inpainting maskesi
+  }
+
+Model, Replicate'in bulut inference API'si üzerinden erişilir. GPU tahsisi,
+model yükleme ve çıktı teslimatını Replicate yönetir — diffusion modeli
+yerel olarak çalıştırılmaz.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  3. MEDİAPİPE SEGMENTASYON (WEB UYGULAMASI — KIYAFET MASKESİ PIPELINE)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Web uygulaması, Google'ın MediaPipe Tasks Vision kütüphanesini kullanarak
+tarayıcı taraflı bir görüntü segmentasyon pipeline'ı içermektedir.
+
+Kullanılan model:
+  selfie_multiclass_256x256 (TFLite float32)
+  Kaynak: storage.googleapis.com/mediapipe-models/...
+
+Bu, TAMAMEN tarayıcıda çalışan hafif bir semantik segmentasyon modelidir.
+WebAssembly + WebGL aracılığıyla GPU üzerinde yürütülür (delegate: "GPU").
+
+Model her piksel için şu sınıf etiketlerinden birini üretir:
+  0 = arka plan
+  1 = saç
+  2 = beden-deri (kollar, bacaklar, göğüs)
+  3 = yüz-deri
+  4 = kıyafet
+  5 = diğer
+
+VTO bu modelden iki segmentasyon fonksiyonu kullanır:
+
+  extractSkinMask()
+    - category = 2 (beden-deri) veya 3 (yüz-deri) olan pikselleri seçer
+    - Sadece görünen deri bölgelerini gösteren bir PNG üretir
+
+  extractClothesMask()
+    - category = 4 (kıyafet) olan pikselleri seçer
+    - Binary maske oluşturur: beyaz = kıyafet bölgesi, siyah = diğer her şey
+    - IDM-VTON'un mask_img parametresinde tam olarak beklediği format budur
+    - Kullanım: IDM-VTON'a "ŞU bölgeyi yeni kıyafetle değiştir" demek için
+
+Pipeline:
+  1. Kullanıcı web uygulamasında kişi fotoğrafını yükler
+  2. Tarayıcı MediaPipe segmentasyonunu çalıştırır (GPU hızlandırmalı)
+  3. Kategori maskesi çıkarılır → kıyafet pikselleri izole edilir → beyaz/siyah maske
+  4. Bu maske, fotoğrafla birlikte generate API endpoint'ine gönderilir
+  5. IDM-VTON bunu hedefli inpainting için kullanır
+
+Neden istemci taraflı?
+  Segmentasyonu tarayıcıda çalıştırmak demek:
+  - Sıfır maliyet (segmentasyon için GPU sunucusu gerekmez)
+  - Milisaniye düzeyinde gecikme (kullanıcının cihazındaki GPU ile inference)
+  - Gizlilik (bu adımda kişi görseli tarayıcıdan hiç çıkmaz)
+
+Mobil uygulama şu an maske göndermemektedir — IDM-VTON bu durumda otomatik
+segmentasyon geri dönüşü yapar. Bilinen bir kalite takası: web'de istemci
+taraflı maske, çıktı hassasiyetini artırır.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  4. ASYNC ÜRETİM PIPELINE'I (TEMEL AKIŞ)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Bu, projedeki en önemli mühendislik kararıdır. IDM-VTON ile görsel üretmek
+~20-40 saniye sürer. HTTP bağlantısını bu kadar süre açık tutamazsınız —
+Vercel Serverless Functions en fazla 60 saniye çalışır ve mobil ağlardaki
+istemciler bağlantıyı düşürür.
+
+Çözüm: istemci taraflı polling ile async iş tabanlı mimari.
+
+ADIM 1 — İŞ OLUŞTURMA  [POST /api/generate]
+  - İstemci gönderir: kişi fotoğrafı (base64), kıyafet (base64), isteğe bağlı maske
+  - Sunucu çağrır: replicate.predictions.create({ version, input })
+  - Replicate hemen prediction nesnesi döner:
+      { id: "abc123...", status: "starting" }
+  - Sunucu bu prediction ID'yi HEMEN istemciye döner
+  - Toplam sunucu süresi: ~500ms (sadece iş oluşturur, beklemez)
+
+ADIM 2 — ARKA PLANDA İŞLEME  [Replicate altyapısı]
+  - Replicate GPU tahsis eder, IDM-VTON'u yükler, diffusion işlemini çalıştırır
+  - Durum ilerlemesi: "starting" → "processing" → "succeeded" / "failed"
+  - Bu 20-40 saniye boyunca istemci HTTP bağlantısından tamamen bağımsız çalışır
+
+ADIM 3 — İSEMCİ POLLING  [GET /api/predictions/{id}]
+  - İstemci her 3 saniyede bir sorgular: en fazla 30 deneme (= toplam 90 saniye)
+  - Sunucu çağrır: replicate.predictions.get(id)
+  - status === "succeeded" olduğunda: çıktı URL'sini çıkarıp döner
+  - status === "failed" veya "canceled": hata fırlatır
+  - Hâlâ "processing": durum döner, istemci bekleyip tekrar sorgular
+
+ADIM 4 — SONUÇ KALICILIĞI
+  - İstemci üretilen görsel için Replicate CDN URL'sini alır
+  - Görseli fetch edip Supabase Storage'a yükler (try-ons bucket)
+    Yol: {userId}/{timestamp}.jpg
+  - generations tablosuna kayıt ekler
+  - Replicate CDN URL'si kalıcı Supabase URL'si ile değiştirilir
+  - Bu adım kritik değildir: kalıcılık başarısız olsa bile görsel gösterilir
+
+Kullanılan sabitler:
+  GENERATE_TIMEOUT_MS = 15.000  ← POST /generate 15sn'den uzun sürerse iptal
+  POLL_INTERVAL_MS    = 3.000   ← her 3 saniyede bir sorgula
+  POLL_MAX_ATTEMPTS   = 30      ← toplamda 90 saniye sonra vazgeç
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  5. BACKEND: SUPABASE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Supabase şunları sağlar: PostgreSQL veritabanı + Auth + Storage.
+
+VERİTABANI ŞEMASI:
+
+  Tablo: public.profiles
+    id         UUID (FK → auth.users, PRIMARY KEY)
+    name       TEXT
+    height     TEXT  ← boy (cm)
+    weight     TEXT  ← kilo (kg)
+    gender     TEXT DEFAULT 'Male'
+    avatar_url TEXT  ← Supabase Storage CDN URL'si
+    updated_at TIMESTAMPTZ
+
+  Tablo: public.generations
+    id                  UUID (gen_random_uuid, PRIMARY KEY)
+    user_id             UUID (FK → auth.users, NOT NULL)
+    base_image_url      TEXT  (mobil için "saved_on_device")
+    garment_image_url   TEXT  (mobil için "data_uri_omitted")
+    garment_title       TEXT
+    generated_image_url TEXT  (kalıcı Supabase CDN URL'si)
+    created_at          TIMESTAMPTZ
+
+SATIR DÜZEYİ GÜVENLİK (Row Level Security — RLS):
+  Tüm tablolarda RLS etkindir. Policy'ler kullanıcıların yalnızca kendi
+  verilerini okuyup yazabilmesini garanti eder. uid() kontrolü veritabanı
+  düzeyinde yapılır — bir istemci başka kullanıcının verisine erişmeye
+  çalışsa bile PostgreSQL reddeder.
+
+DEPOLAMA BUCKET'LARI:
+  try-ons (public)
+    Yol yapısı: {user_id}/{timestamp}.jpg
+    Yükleme: sadece kimliği doğrulanmış kullanıcılar, kendi klasörlerine
+    Okuma: herkese açık (CDN URL'leri auth gerektirmez)
+    Silme: kimliği doğrulanmış kullanıcılar, kendi dosyaları
+
+  avatars (public)
+    Yol yapısı: {user_id}/avatar.jpg
+    upsert: true ile yüklendiğinden her yeni avatar öncekinin üzerine yazar
+
+TETİKLEYİCİ: Kayıt olunca profil otomatik oluştur
+  Yeni bir auth kullanıcısı oluştuğunda handle_new_user() tetiklenir
+  ve boş bir profil satırı eklenir. Böylece profil her zaman vardır —
+  null kontrolü gerekmez.
+
+RPC: delete_user_data() — App Store zorunluluğu
+  Kimliği doğrulanmış kullanıcıya ait tüm generations ve profile kayıtlarını siler.
+  Mobil uygulamanın Profil ekranından hesap silme talebinde çağrılır.
+  SECURITY DEFINER: yükseltilmiş yetkiyle her iki tabloyu atomik olarak temizler.
+
+İSTEMCİ BAŞLATMA:
+  Web uygulaması:
+    @supabase/ssr paketi — iki istemci:
+    - createBrowserClient(): istemci bileşenler için (tarayıcı)
+    - createServerClient(): sunucu bileşenleri ve API route'ları için (Node.js)
+    Next.js App Router'da bileşenler hem sunucuda hem istemcide çalıştığından
+    bu ayrım zorunludur.
+
+  Mobil uygulama:
+    Standart @supabase/supabase-js istemcisi
+    React Native için URL API polyfill
+    Oturum kalıcılığı için AsyncStorage (localStorage yerine)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  6. NEXT.JS WEB UYGULAMASI MİMARİSİ
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Framework: Next.js 16 (App Router)
+Çalışma zamanı: Vercel üzerinde Node.js serverless
+
+API Route'ları:
+  POST /api/generate          → Replicate prediction işi oluşturur
+  GET  /api/predictions/{id}  → Replicate iş durumunu sorgular
+  POST /api/scrape            → Ürün sayfasından kıyafet verisi çeker
+
+KIYAFET SCRAPER (/api/scrape):
+  Bir e-ticaret ürün URL'si alır (Zara, H&M, herhangi bir site).
+  Cheerio HTML parser ile şunları çıkarır:
+    - Başlık: og:title → twitter:title → <title> → <h1>
+    - Görsel: og:image → twitter:image → .product-image içindeki ilk img
+    - Fiyat: product:price:amount meta → .price sınıflı elementler
+    - Göreli URL'ler mutlak URL'lere dönüştürülür
+
+  Bu özellik sayesinde kullanıcı kıyafet URL'sini yapıştırır, uygulama
+  görseli ve ürün adını otomatik olarak alır.
+
+BACKEND-FOR-FRONTEND (BFF) PATTERN:
+  REPLICATE_API_TOKEN hiçbir zaman istemciye açık olmamalıdır.
+  Next.js API route'ları sunucuda çalışır ve sunucu taraflı ortam
+  değişkenlerine erişebilir. Mobil uygulama Replicate'e doğrudan bağlanmaz —
+  Next.js API'si üzerinden bağlanır. Bu pattern BFF olarak bilinir.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  7. EXPO REACT NATIVE MOBİL UYGULAMA MİMARİSİ
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Framework: Expo SDK 54 + Expo Router v6
+React Native: 0.81.5 (Yeni Mimari etkin — Fabric renderer + JSI)
+Navigasyon: Expo Router (dosya tabanlı yönlendirme, React Navigation v7 üzerine)
+Build: EAS (Expo Application Services)
+
+YENİ MİMARİ (New Architecture):
+  React Native 0.71+ ile gelen Fabric renderer ve JSI (JavaScript Interface),
+  JavaScript ve native kod arasındaki köprüyü (bridge) ortadan kaldırır.
+  JSI, JS'nin native C++ nesnelerine doğrudan senkron erişimine izin verir —
+  async bridge mesajları yerine. Bu, animasyon ve kamera gibi performans
+  hassas özellikler için önemlidir.
+
+ROTA YAPISI:
+  app/_layout.tsx          → Kök layout: auth durumu dinleyicisi, oturum koruması
+  app/index.tsx            → Giriş yönlendirmesi (oturuma göre auth veya tabs)
+  app/auth.tsx             → Giriş Yap / Hesap Oluştur ekranı
+  app/(tabs)/_layout.tsx   → Alt tab bar (5 görünür sekme)
+  app/(tabs)/home.tsx      → Try-On ekranı (ana özellik)
+  app/(tabs)/analysis.tsx  → Beden Analizi
+  app/(tabs)/history.tsx   → Dolabım (geçmiş üretimler)
+  app/(tabs)/stylist.tsx   → AI Stilist
+  app/(tabs)/share.tsx     → Paylaş & Analiz Et
+  app/(tabs)/profile.tsx   → Profil Ayarları (href: null — tab bar'dan gizli)
+
+KÖK LAYOUT PATTERN:
+  _layout.tsx, supabase.auth.onAuthStateChange'i dinler.
+  SIGNED_IN → /(tabs)/home'a yönlendir
+  SIGNED_OUT → /auth'a yönlendir
+  Bu, kimlik doğrulama kapısının her zaman uygulandığını garanti eder.
+
+PROFIL CONTEXT:
+  ProfileContext, tüm sekme düzenini sarar.
+  Supabase'den profil verisini çeker ve şunları sağlar:
+    { profile, updateProfile() }
+  Her sekme ekranı, bireysel veritabanı çağrısı yapmadan profil verisine erişir.
+
+YEREL DEPOLAMA KATMANI:
+  Kişi fotoğrafları cihazda yerel olarak saklanır (Supabase'e yüklenmez).
+  savedPhotos.ts:
+    - expo-file-system + AsyncStorage kullanır
+    - Geçici picker URI'sinden kalıcı documentDirectory'ye kopyalar
+    - AsyncStorage'da en fazla 6 fotoğraf listesi tutar
+    - Sağlar: getSavedPhotos(), savePhoto(), deletePhoto(), readPhotoAsBase64()
+
+  Neden bu tasarım?
+    Kişi fotoğrafları biyometrik veriye yakın hassas verilerdir.
+    Sadece üretim sırasında base64 olarak gönderilir, sunucuda saklanmaz.
+    Veritabanındaki base_image_url alanı "saved_on_device" dizesidir —
+    gerçek bir URL değil, yer tutucu.
+
+FOTOĞRAF-BASE64 PIPELINE (mobil):
+  iOS/Android, uzak bir sunucuya raw file:// URI gönderilmesine izin vermez.
+  Çözüm: expo-file-system dosyayı okur ve base64 string döner.
+  Bu base64, data URI'ye sarılır:
+    "data:image/jpeg;base64," + base64String
+  ve POST body'de Next.js backend'e gönderilir.
+
+KAMERA ROLÜNE KAYDET:
+  expo-media-library kullanılarak üretilen görseller cihazın fotoğraf
+  kütüphanesine kaydedilir.
+  Akış:
+    1. İzin iste (MediaLibrary.requestPermissionsAsync)
+    2. İzin verilmişse: MediaLibrary.saveToLibraryAsync(url)
+    3. URL, Supabase CDN'den gelen https:// URL'si olmalıdır
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  8. MOBİL UYGULAMA EKRANLARİ — ÖZELLİK DETAYLARI
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  [SEKME 1] Try On (home.tsx) — ana özellik
+    - Fotoğraf yönetimi: en fazla 6 kayıtlı fotoğraf, kamera veya galeri girişi
+    - Kıyafet seçici: galeri girişi, base64 inline yakalanır
+    - Üret butonu: yukarıda açıklanan async pipeline'ı tetikler
+    - Yükleniyor durumu: adım mesajları + animasyonlu spinner + imza metni
+    - Sonuç ekranı: AR çerçevesi ve scan line animasyonu (React Native Animated API),
+      parlayan "LIVE PREVIEW" rozeti, "✓ FIT DETECTED" katmanı
+    - Eylemler: "Try Another Outfit" (sıfırla) + "Kamera Rolüne Kaydet"
+
+  [SEKME 2] Beden Analizi (analysis.tsx)
+    - Girdi: boy (cm), kilo (kg), cinsiyet (Erkek/Kadın/Diğer)
+    - Tüm hesaplama %100 istemci taraflıdır (API çağrısı yok):
+        VKI = kilo / (boy/100)²
+        VKI × cinsiyet matrisine göre vücut tipi sınıflandırması
+        Ağırlık aralığı tablolarına göre beden önerisi (cinsiyete özgü)
+        Birincil beden + güven yüzdesi, gerekirse ikincil komşu beden
+    - Çıktı: VKI kartı, beden önerisi, vücut tipi, uyum ipuçları,
+      "size yakışır" listesi, "dikkat edilmesi gerekenler" listesi
+    - Ölçüler ProfileContext üzerinden profile kaydedilir, bir sonraki
+      ziyarette önceden dolu gelir
+
+  [SEKME 3] Dolabım (history.tsx)
+    - Supabase'den kullanıcının generations kayıtlarını çeker
+    - Geçmiş try-on sonuçlarını grid görünümünde gösterir
+    - Bireysel kayıtları silme özelliği (DB'den + storage'dan siler)
+
+  [SEKME 4] AI Stilist (stylist.tsx)
+    - Kullanıcı galeriden kıyafet görseli seçer
+    - 3 küratörlenmiş kombin kartı döner:
+        Casual Day Out, Smart Office Look, Night Out
+    - Her kart şunları içerir: kombin parçaları, aksesuarlar,
+      ayakkabı, saç önerisi ve stil ipucu
+    - Şu an statik veri kullanıyor (şablon tabanlı öneriler)
+    - 1.8 saniyelik yükleme simülasyonu algılanan AI işlemesini sağlar
+
+  [GİZLİ] Profil (profile.tsx)
+    - AppHeader avatar'ına dokunarak veya yan menüden erişilir
+    - Profil fotoğrafı yükleme (kamera veya galeri → Supabase avatars bucket)
+    - Ad, boy, kilo, cinsiyet düzenleme
+    - Hesap silme (delete_user_data() RPC + auth.signOut())
+    - href: null ile tab bar'dan tamamen çıkarılmıştır
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  9. EAS BUILD & APP STORE PIPELINE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+EAS, bulut tabanlı native build'leri yönetir.
+
+  eas.json profilleri:
+    development  → yerel test için Expo Dev Client ile derleme
+    preview      → TestFlight benzeri dahili dağıtım
+    production   → App Store / Play Store yayın build'i (autoIncrement: true)
+
+Uygulama kimlik bilgileri:
+  iOS Bundle ID:      com.fedakar.virtualtryon
+  Android Package:    com.fedakar.virtualtryon
+  EAS Project ID:     e7b7f796-f302-4f3f-8b4c-fa6e55c03531
+  EAS Owner:          selimfedakar
+
+Build komutu:    eas build --platform ios --profile production
+Gönderim komutu: eas submit --platform ios
+
+App Store gereksinimleri karşılandı:
+  - Gizlilik politikası: Vercel'deki /privacy sayfası
+  - Hesap silme: delete_user_data() RPC + profil ekranı
+  - Kamera izni: NSCameraUsageDescription
+  - Fotoğraf kütüphanesi okuma: NSPhotoLibraryUsageDescription
+  - Fotoğraf kütüphanesi yazma: NSPhotoLibraryAddUsageDescription
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  10. NEDEN BU MİMARİ? — TEMEL KARARLAR
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Soru: IDM-VTON neden kendi sunucunda çalıştırılmıyor?
+  Cevap: Stable Diffusion çalıştırmak A100/H100 GPU gerektirir (>saatte $2).
+    Replicate, inference başına ücret alır — ~30 saniyelik üretim için
+    yaklaşık $0.05-0.10. Küçük ölçekte bu, always-on GPU altyapısından
+    çok daha ucuzdur. Ayrıca Replicate, auto-scaling, model versiyonlama
+    ve cold start yönetimini üstlenir.
+
+  Soru: Neden WebSocket veya SSE değil de polling?
+  Cevap: Replicate API'si iş tabanlıdır — görüntü üretimi için streaming
+    endpoint yoktur. Polling burada doğru pattern'dir. WebSocket, istemcinin
+    3 saniyede bir tek bir durum alanını kontrol etmesi için bağlantı
+    yönetimi karmaşıklığı ekler ve bu gereksizdir.
+
+  Soru: Neden Next.js Backend-for-Frontend (BFF) olarak kullanıldı?
+  Cevap: REPLICATE_API_TOKEN asla istemciye açık olmamalıdır.
+    Next.js API route'ları sunucuda çalışır ve sunucu taraflı ortam
+    değişkenlerine erişebilir. Mobil uygulama Replicate'e doğrudan değil,
+    Next.js API üzerinden bağlanır. Bu BFF pattern'idir.
+
+  Soru: Neden kişi fotoğrafları cihazda tutulur, yüklenmez?
+  Cevap: Kişi fotoğrafları biyometrik veriye yakındır. Sunucuya yüklemek
+    daha sıkı GDPR/gizlilik uyumu, veri işleme bildirimi ve depolama maliyeti
+    gerektirir. Sadece üretim sırasında base64 olarak gönderip saklamayarak
+    kişisel veri işleme minimize edilir.
+
+  Soru: Neden Firebase değil Supabase?
+  Cevap: Supabase, PostgreSQL üzerine kuruludur — gerçek ilişkisel şema,
+    JOIN'ler, SQL düzeyinde RLS policy'leri. Kullanıcı kimlik doğrulaması,
+    profil depolama ve user_id yabancı anahtarlı generations geçmişini
+    birlikte yönetmek için ilişkisel model doğal seçimdir. Supabase Storage
+    ayrıca aynı RLS policy'leri ile uyumlu S3 benzeri nesne depolama sunar.
+
+  Soru: Neden monorepo?
+  Cevap: Web ve mobil uygulamalar aynı Supabase şemasını, aynı API endpoint'lerini
+    ve kavramsal olarak aynı ürünü paylaşır. Monorepo tek bir git geçmişi,
+    paylaşılan ortam değişkeni dokümantasyonu ve şema geçişlerinde daha kolay
+    koordinasyon sağlar. .vercelignore ile mobil alt dizin Vercel build'inden hariç tutulur.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  11. TAM TEKNOLOJİ YIĞINI
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  AI / ML:
+    IDM-VTON (Stable Diffusion tabanlı sanal kıyafet deneme)
+    MediaPipe Tasks Vision (tarayıcı içi semantik segmentasyon, TFLite)
+    Replicate (bulut ML inference platformu / GPU API)
+
+  Frontend — Web:
+    Next.js 16 (App Router, Sunucu Bileşenleri, Route Handler'lar)
+    React 19.2
+    TypeScript 5
+    Tailwind CSS v4
+    @supabase/ssr (SSR uyumlu Supabase istemcisi)
+    @mediapipe/tasks-vision (tarayıcı ML inference)
+    cheerio (kıyafet verisi için HTML scraping)
+    lucide-react (ikon kütüphanesi)
+    Vercel (dağıtım + CDN + Serverless Functions)
+
+  Frontend — Mobil:
+    Expo SDK 54 (Yeni Mimari / Fabric renderer)
+    React Native 0.81.5
+    Expo Router v6 (dosya tabanlı yönlendirme)
+    React 19.1
+    TypeScript 5.9
+    expo-image-picker (kamera + galeri erişimi)
+    expo-file-system (yerel dosya kalıcılığı)
+    expo-media-library (kamera rolüne kaydet)
+    expo-blur (glassmorphism tab bar)
+    @react-native-async-storage/async-storage (yerel anahtar-değer deposu)
+    react-native-url-polyfill (RN'de Supabase için URL API)
+    EAS (bulut build'leri + gönderim)
+
+  Backend / Altyapı:
+    Supabase (PostgreSQL 15, Auth, Storage, Row Level Security)
+    Replicate API (model barındırma + async iş kuyruğu)
+
+  Geliştirme:
+    Git monorepo (web + mobil aynı depoda)
+    TypeScript tüm stack'te (sıfır hata, strict mod)
+    ESLint (Next.js konfigürasyonu)
+
+================================================================================
+  _fedakar's product, always for something better!
+================================================================================
