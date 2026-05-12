@@ -1,0 +1,119 @@
+================================================================================
+  VTO — App Store Metadata
+  Hazırlık dosyası — Apple Store Connect'e girerken buradan kopyala-yapıştır
+================================================================================
+
+
+────────────────────────────────────────────────────────────────────────────────
+  APP NAME  (maks. 30 karakter)
+────────────────────────────────────────────────────────────────────────────────
+
+VTO: AI Fashion Studio
+
+
+────────────────────────────────────────────────────────────────────────────────
+  SUBTITLE  (maks. 30 karakter)
+────────────────────────────────────────────────────────────────────────────────
+
+Try On Any Outfit with AI
+
+
+────────────────────────────────────────────────────────────────────────────────
+  DESCRIPTION  (maks. 4000 karakter)
+────────────────────────────────────────────────────────────────────────────────
+
+VTO lets you try on any outfit before you buy it — powered by AI.
+
+Just snap a photo of yourself and a garment you love. VTO's AI instantly shows you exactly how that piece would look on your body, your style, your way.
+
+WHY VTO?
+• No more returns — see the fit before you commit
+• Shop smarter with AI-powered virtual try-ons
+• Build your virtual Closet and revisit every past look
+• Get personalized tips from your AI Stylist
+• Share your favorite outfits with friends instantly
+
+HOW IT WORKS
+1. Upload your photo or take one in-app
+2. Add a garment from your camera roll
+3. Tap Generate — AI does the rest in seconds
+4. Save to your camera roll, share, or ask your Stylist for advice
+
+FEATURES
+→ Photorealistic AI try-on powered by state-of-the-art models
+→ Closet: your personal history of every generated look
+→ Fit Analysis: understand your measurements and proportions
+→ AI Stylist: chat-based style recommendations tailored to you
+→ Share tab: pick your best look and post it anywhere
+
+Whether you're refreshing your wardrobe, shopping online, or exploring a new style — VTO is your personal AI fashion studio, always in your pocket.
+
+Download VTO and never buy the wrong outfit again.
+
+
+────────────────────────────────────────────────────────────────────────────────
+  KEYWORDS  (tam 100 karakter — virgülle ayrılı, boşluk yok)
+────────────────────────────────────────────────────────────────────────────────
+
+virtual try on,fashion,outfit,AI style,wardrobe,clothes,fit,stylist,tryon,dressing,look,shop,ootd,ai
+
+
+────────────────────────────────────────────────────────────────────────────────
+  WHAT'S NEW  (ilk sürüm)
+────────────────────────────────────────────────────────────────────────────────
+
+Welcome to VTO — your AI-powered fashion studio.
+
+Try on any outfit instantly with AI, save your favorites to your Closet, and get personalized style advice from your AI Stylist. This is the first release — more features are on the way.
+
+
+────────────────────────────────────────────────────────────────────────────────
+  KATEGORİ
+────────────────────────────────────────────────────────────────────────────────
+
+Primary:   Shopping
+Secondary: Lifestyle
+
+
+────────────────────────────────────────────────────────────────────────────────
+  AGE RATING
+────────────────────────────────────────────────────────────────────────────────
+
+4+
+
+
+────────────────────────────────────────────────────────────────────────────────
+  PRIVACY POLICY URL
+────────────────────────────────────────────────────────────────────────────────
+
+https://virtual-try-on-three-sage.vercel.app/privacy
+
+
+────────────────────────────────────────────────────────────────────────────────
+  SUPPORT URL
+────────────────────────────────────────────────────────────────────────────────
+
+https://virtual-try-on-three-sage.vercel.app
+
+
+────────────────────────────────────────────────────────────────────────────────
+  EAS.JSON — DOLDURMANI GEREKEN DEĞERLER
+────────────────────────────────────────────────────────────────────────────────
+
+appleTeamId  →  Apple Developer hesabından al: developer.apple.com/account
+                (10 karakterlik kod, örn: ABC1234567)
+
+ascAppId     →  App Store Connect'te uygulama oluşturduktan sonra
+                "App Information" sayfasında "Apple ID" olarak görünür
+                (10 haneli sayı, örn: 1234567890)
+
+
+────────────────────────────────────────────────────────────────────────────────
+  BUILD & SUBMIT KOMUTLARI (sırasıyla çalıştır)
+────────────────────────────────────────────────────────────────────────────────
+
+1. eas build --platform ios --profile production
+2. eas submit --platform ios
+
+
+================================================================================
