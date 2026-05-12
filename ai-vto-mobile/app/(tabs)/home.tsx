@@ -5,6 +5,8 @@ import {
   Modal, Pressable,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as MediaLibrary from 'expo-media-library';
+import * as FileSystem from 'expo-file-system/legacy';
 import { useState, useRef, useEffect } from 'react';
 import { supabase } from '../../src/lib/supabase';
 import AppHeader from '../../src/components/AppHeader';
@@ -15,7 +17,10 @@ import {
 import { uploadTryOnImage } from '../../src/lib/storage';
 import { saveGarment } from '../../src/lib/savedGarments';
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL ?? 'http://192.168.1.190:3000';
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL ?? 'https://virtual-try-on-three-sage.vercel.app';
+const GENERATE_TIMEOUT_MS = 15_000;
+const POLL_INTERVAL_MS = 3_000;
+const POLL_MAX_ATTEMPTS = 30;
 
 const STEPS = [
   { num: '1', icon: '📷', label: 'Your Photo' },
@@ -30,8 +35,10 @@ export default function Home() {
   const [garmentUri, setGarmentUri] = useState<string | null>(null);
   const [garmentBase64, setGarmentBase64] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [loadingStep, setLoadingStep] = useState('');
   const [resultImage, setResultImage] = useState<string | null>(null);
   const [showDeleteModal, setShowDeleteModal] = useState<SavedPhoto | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   const scanAnim = useRef(new Animated.Value(0)).current;
   const glowAnim = useRef(new Animated.Value(0.4)).current;
@@ -102,19 +109,22 @@ export default function Home() {
       setGarmentUri(uri);
       setGarmentBase64(result.assets[0].base64 ?? null);
       setResultImage(null);
-      // Save garment to closet immediately
       saveGarment(uri).catch(() => {});
     }
   };
+
+  const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
   const handleGenerate = async () => {
     if (!selectedPhoto || !garmentBase64) return;
     setIsGenerating(true);
     setResultImage(null);
+    setLoadingStep('Sending to AI...');
+
     try {
       const personBase64 = await readPhotoAsBase64(selectedPhoto.uri);
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 15000);
+      const timeout = setTimeout(() => controller.abort(), GENERATE_TIMEOUT_MS);
 
       let response: Response;
       try {
@@ -135,57 +145,91 @@ export default function Home() {
       if (!data.success) throw new Error(data.error ?? 'Backend returned an error');
 
       const predictionId: string = data.data.predictionId;
-      const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+      setLoadingStep('AI is generating your look...');
 
-      for (let attempt = 0; attempt < 30; attempt++) {
-        await sleep(3000);
-        const statusRes = await fetch(`${BACKEND_URL}/api/predictions/${predictionId}`);
-        const statusData = await statusRes.json();
+      for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt++) {
+        await sleep(POLL_INTERVAL_MS);
 
-        if (statusData.status === 'succeeded') {
-          const replicateUrl: string = statusData.data.generatedImage;
-          let finalUrl = replicateUrl;
+        try {
+          const statusRes = await fetch(`${BACKEND_URL}/api/predictions/${predictionId}`);
+          const statusData = await statusRes.json();
 
-          try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (user) {
-              finalUrl = await uploadTryOnImage(replicateUrl, user.id);
-              const { error: dbError } = await supabase.from('generations').insert({
-                user_id: user.id,
-                base_image_url: 'saved_on_device',
-                garment_image_url: 'data_uri_omitted',
-                garment_title: 'Mobile Upload',
-                generated_image_url: finalUrl,
-              });
-              if (dbError) console.error('DB insert:', dbError.message);
-            }
-          } catch (saveErr) {
-            console.error('Save error:', saveErr);
+          if (statusData.status === 'succeeded') {
+            const replicateUrl: string = statusData.data.generatedImage;
+
+            // Show result immediately — do not block on Supabase upload
+            setResultImage(replicateUrl);
+            setGarmentUri(null);
+            setGarmentBase64(null);
+
+            // Background save (fire-and-forget)
+            (async () => {
+              try {
+                const { data: { user } } = await supabase.auth.getUser();
+                if (user) {
+                  const supabaseUrl = await uploadTryOnImage(replicateUrl, user.id);
+                  await supabase.from('generations').insert({
+                    user_id: user.id,
+                    base_image_url: 'saved_on_device',
+                    garment_image_url: 'data_uri_omitted',
+                    garment_title: 'Mobile Upload',
+                    generated_image_url: supabaseUrl,
+                  });
+                }
+              } catch {
+                // background save failure is non-critical
+              }
+            })();
+
+            return;
           }
 
-          setResultImage(finalUrl);
-          setGarmentUri(null);
-          setGarmentBase64(null);
-          return;
-        }
-
-        if (statusData.status === 'failed' || statusData.status === 'canceled') {
-          throw new Error(`Generation ${statusData.status}: ${statusData.error ?? 'unknown'}`);
+          if (statusData.status === 'failed' || statusData.status === 'canceled') {
+            throw new Error(`Generation ${statusData.status}: ${statusData.error ?? 'unknown'}`);
+          }
+        } catch (pollErr: any) {
+          // Skip transient network errors during polling — only rethrow hard failures
+          if (pollErr.message?.startsWith('Generation')) throw pollErr;
         }
       }
-      throw new Error('Generation timed out after 90 seconds.');
+      throw new Error('Generation timed out. Please try again.');
     } catch (err: any) {
-      const isNetworkError = err.message?.includes('fetch') || err.name === 'AbortError' || err.message?.includes('Network');
+      const isNetworkError =
+        err.name === 'AbortError' ||
+        err.message?.toLowerCase().includes('network') ||
+        err.message?.toLowerCase().includes('fetch');
       if (isNetworkError) {
         Alert.alert(
           'Connection Failed',
-          `Could not reach the backend server.\n\nMake sure:\n• Your Mac's backend is running (npm run dev)\n• EXPO_PUBLIC_BACKEND_URL in .env is your Mac's current IP\n• Your phone and Mac are on the same Wi-Fi\n\nCurrent URL: ${BACKEND_URL}`,
+          'Could not reach the server. Please check your internet connection and try again.',
         );
       } else {
         Alert.alert('Error', err.message ?? 'Something went wrong.');
       }
     } finally {
       setIsGenerating(false);
+      setLoadingStep('');
+    }
+  };
+
+  const handleSaveToLibrary = async () => {
+    if (!resultImage) return;
+    setIsSaving(true);
+    try {
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Photo library access is required to save images.');
+        return;
+      }
+      // iOS requires a local file path — download first
+      const localUri = FileSystem.cacheDirectory + 'tryon_save.jpg';
+      const { uri } = await FileSystem.downloadAsync(resultImage, localUri);
+      await MediaLibrary.saveToLibraryAsync(uri);
+      Alert.alert('Saved!', 'Your try-on image has been saved to your photo library.');
+    } catch {
+      Alert.alert('Error', 'Could not save the image. Please try again.');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -219,6 +263,16 @@ export default function Home() {
           </View>
           <TouchableOpacity style={styles.primaryBtn} onPress={() => setResultImage(null)}>
             <Text style={styles.primaryBtnText}>Try Another Outfit</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.saveLibraryBtn, isSaving && { opacity: 0.6 }]}
+            onPress={handleSaveToLibrary}
+            disabled={isSaving}
+          >
+            {isSaving
+              ? <ActivityIndicator color="#ffffff" />
+              : <Text style={styles.saveLibraryText}>⬇  Save to Camera Roll</Text>
+            }
           </TouchableOpacity>
         </ScrollView>
       </SafeAreaView>
@@ -349,9 +403,9 @@ export default function Home() {
         {isGenerating && (
           <View style={styles.loadingBox}>
             <ActivityIndicator size="large" color="#ffffff" />
-            <Text style={styles.loadingTitle}>AI is generating your look...</Text>
-            <Text style={styles.loadingSubtitle}>This takes about 20–25 seconds.</Text>
-            <Text style={styles.loadingTagline}>_fedakar's product, always for something better!</Text>
+            <Text style={styles.loadingTitle}>{loadingStep}</Text>
+            <Text style={styles.loadingSubtitle}>This takes about 20–30 seconds.</Text>
+            <Text style={styles.loadingSignature}>_fedakar's product, always for something better!</Text>
           </View>
         )}
       </ScrollView>
@@ -385,7 +439,6 @@ const C = 22; const T = 3;
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000000' },
 
-  // Guide
   guideCard: {
     marginHorizontal: 16, marginTop: 14, marginBottom: 6,
     backgroundColor: '#0a1b2e', borderRadius: 18, padding: 16,
@@ -409,7 +462,6 @@ const styles = StyleSheet.create({
   guideLabel: { color: '#7eb8d6', fontSize: 9, fontWeight: '600', textAlign: 'center' },
   guideSep: { color: '#2a5a8a', fontSize: 18, paddingHorizontal: 2, marginBottom: 16 },
 
-  // Section headers
   sectionHeader: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     paddingHorizontal: 16, marginTop: 20, marginBottom: 10,
@@ -423,7 +475,6 @@ const styles = StyleSheet.create({
   },
   addBtnText: { color: '#d0e8f8', fontSize: 12, fontWeight: '600' },
 
-  // No photos
   emptyPhotoCard: {
     marginHorizontal: 16, backgroundColor: '#141414', borderRadius: 20, padding: 28,
     alignItems: 'center', borderWidth: 1, borderColor: '#2a2a2a',
@@ -433,7 +484,6 @@ const styles = StyleSheet.create({
   emptyPhotoSub: { color: '#666', fontSize: 13, textAlign: 'center', marginBottom: 20 },
   emptyPhotoActions: { flexDirection: 'row', gap: 12 },
 
-  // Photo thumbnails
   photosRow: { paddingHorizontal: 16, gap: 10, paddingRight: 8 },
   photoThumb: {
     width: 82, height: 110, borderRadius: 14, overflow: 'hidden',
@@ -456,7 +506,6 @@ const styles = StyleSheet.create({
   addThumbLabel: { color: '#555', fontSize: 10, fontWeight: '600' },
   longPressHint: { color: '#484848', fontSize: 10, textAlign: 'center', marginTop: 8, marginBottom: 4 },
 
-  // Garment
   garmentCard: {
     height: 300, marginHorizontal: 16, borderRadius: 20, overflow: 'hidden',
     backgroundColor: '#0a1520', borderWidth: 1.5, borderColor: '#1e4878',
@@ -472,7 +521,6 @@ const styles = StyleSheet.create({
   },
   changeText: { color: '#fff', fontSize: 13, fontWeight: '600' },
 
-  // Buttons
   primaryBtn: {
     backgroundColor: '#ffffff', marginHorizontal: 16, marginTop: 20,
     padding: 20, borderRadius: 100, alignItems: 'center',
@@ -480,13 +528,11 @@ const styles = StyleSheet.create({
   primaryBtnText: { color: '#000', fontSize: 17, fontWeight: 'bold' },
   hintText: { color: '#585858', fontSize: 12, textAlign: 'center', marginTop: 10 },
 
-  // Loading
   loadingBox: { marginTop: 36, alignItems: 'center', paddingHorizontal: 30 },
   loadingTitle: { color: '#fff', fontSize: 17, fontWeight: 'bold', marginTop: 18, marginBottom: 8 },
   loadingSubtitle: { color: '#888', fontSize: 14, textAlign: 'center', lineHeight: 20 },
-  loadingTagline: { color: '#2d2d2d', fontSize: 11, marginTop: 16, fontStyle: 'italic', textAlign: 'center' },
+  loadingSignature: { color: '#c0392b', fontSize: 11, textAlign: 'center', marginTop: 14, fontStyle: 'italic', letterSpacing: 0.3 },
 
-  // AR result screen
   resultTopRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 16, paddingTop: 16, paddingBottom: 10,
@@ -519,7 +565,13 @@ const styles = StyleSheet.create({
   },
   arFitText: { color: '#22c55e', fontSize: 11, fontWeight: '700', letterSpacing: 1 },
 
-  // Delete dialog
+  saveLibraryBtn: {
+    marginHorizontal: 16, marginTop: 12, padding: 18, borderRadius: 100,
+    alignItems: 'center', borderWidth: 1, borderColor: '#3f3f46',
+    backgroundColor: 'transparent',
+  },
+  saveLibraryText: { color: '#ffffff', fontSize: 16, fontWeight: '600' },
+
   deleteOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 40 },
   deleteDialog: { backgroundColor: '#181818', borderRadius: 20, padding: 24, width: '100%', borderWidth: 1, borderColor: '#2a2a2a' },
   deleteTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold', marginBottom: 8 },
