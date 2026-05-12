@@ -20,9 +20,8 @@
   "submit": {
     "production": {
       "ios": {
-        "appleId": "a.selimfedakar@gmail.com",
-        "ascAppId": "",
-        "appleTeamId": ""
+        "appleTeamId": "FILL_IN",
+        "ascAppId": "FILL_IN"
       }
     }
   }
