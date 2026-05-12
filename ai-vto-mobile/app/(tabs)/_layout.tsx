@@ -74,7 +74,7 @@ export default function TabLayout() {
       />
       <Tabs.Screen
         name="profile"
-        options={{ tabBarButton: () => null }}
+        options={{ href: null }}
       />
     </Tabs>
   );

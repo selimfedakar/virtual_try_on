@@ -154,6 +154,15 @@ const BMI_COLOR: Record<string, string> = {
   Obese: '#ef4444',
 };
 
+function isValidHeight(v: string) {
+  const n = parseFloat(v);
+  return !isNaN(n) && n >= 50 && n <= 250;
+}
+function isValidWeight(v: string) {
+  const n = parseFloat(v);
+  return !isNaN(n) && n >= 20 && n <= 300;
+}
+
 export default function Analysis() {
   const { profile, updateProfile } = useProfile();
   const [height, setHeight] = useState(profile.height);
@@ -161,6 +170,8 @@ export default function Analysis() {
   const [gender, setGender] = useState(profile.gender || 'Male');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [result, setResult] = useState<FitResult | null>(null);
+  const [heightErr, setHeightErr] = useState('');
+  const [weightErr, setWeightErr] = useState('');
 
   useEffect(() => {
     setHeight(profile.height);
@@ -169,7 +180,21 @@ export default function Analysis() {
   }, [profile.height, profile.weight, profile.gender]);
 
   const handleAnalyze = async () => {
-    if (!height || !weight) return;
+    let valid = true;
+    if (!isValidHeight(height)) {
+      setHeightErr('Enter a height between 50 and 250 cm');
+      valid = false;
+    } else {
+      setHeightErr('');
+    }
+    if (!isValidWeight(weight)) {
+      setWeightErr('Enter a weight between 20 and 300 kg');
+      valid = false;
+    } else {
+      setWeightErr('');
+    }
+    if (!valid) return;
+
     setIsAnalyzing(true);
     setResult(null);
     await updateProfile({ height, weight, gender });
@@ -198,18 +223,20 @@ export default function Analysis() {
             <View style={[styles.inputGroup, { flex: 1, marginRight: 10 }]}>
               <Text style={styles.label}>Height (cm)</Text>
               <TextInput
-                style={styles.input} keyboardType="numeric"
+                style={[styles.input, heightErr ? styles.inputError : null]} keyboardType="numeric"
                 placeholder="e.g. 175" placeholderTextColor="#52525b"
-                value={height} onChangeText={setHeight} maxLength={3}
+                value={height} onChangeText={v => { setHeight(v); setHeightErr(''); }} maxLength={3}
               />
+              {!!heightErr && <Text style={styles.fieldError}>{heightErr}</Text>}
             </View>
             <View style={[styles.inputGroup, { flex: 1 }]}>
               <Text style={styles.label}>Weight (kg)</Text>
               <TextInput
-                style={styles.input} keyboardType="numeric"
+                style={[styles.input, weightErr ? styles.inputError : null]} keyboardType="numeric"
                 placeholder="e.g. 70" placeholderTextColor="#52525b"
-                value={weight} onChangeText={setWeight} maxLength={3}
+                value={weight} onChangeText={v => { setWeight(v); setWeightErr(''); }} maxLength={3}
               />
+              {!!weightErr && <Text style={styles.fieldError}>{weightErr}</Text>}
             </View>
           </View>
           <View style={styles.inputGroup}>
@@ -329,6 +356,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#000000', borderWidth: 1, borderColor: '#27272a',
     borderRadius: 12, padding: 14, color: '#ffffff', fontSize: 16,
   },
+  inputError: { borderColor: '#ef4444' },
+  fieldError: { color: '#ef4444', fontSize: 11, marginTop: 4 },
   toggleContainer: {
     flexDirection: 'row', backgroundColor: '#000000',
     borderRadius: 12, borderWidth: 1, borderColor: '#27272a', overflow: 'hidden',

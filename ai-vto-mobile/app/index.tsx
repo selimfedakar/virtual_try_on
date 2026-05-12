@@ -2,9 +2,10 @@ import { Redirect } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { View, ActivityIndicator } from 'react-native';
 import { supabase } from '../src/lib/supabase';
+import { Session } from '@supabase/supabase-js';
 
 export default function Index() {
-  const [session, setSession] = useState<any>(undefined);
+  const [session, setSession] = useState<Session | null | undefined>(undefined);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {

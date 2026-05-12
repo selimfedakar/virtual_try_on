@@ -16,9 +16,23 @@ export default function Auth() {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
+  function validate(): boolean {
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail.includes('@') || !trimmedEmail.includes('.')) {
+      Alert.alert('Invalid email', 'Please enter a valid email address.');
+      return false;
+    }
+    if (mode === 'signup' && password.length < 6) {
+      Alert.alert('Password too short', 'Password must be at least 6 characters.');
+      return false;
+    }
+    return true;
+  }
+
   async function signInWithEmail() {
+    if (!validate()) return;
     setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
     if (error) {
       Alert.alert('Sign In Failed', error.message);
     } else {
@@ -28,8 +42,9 @@ export default function Auth() {
   }
 
   async function signUpWithEmail() {
+    if (!validate()) return;
     setLoading(true);
-    const { data: { session }, error } = await supabase.auth.signUp({ email, password });
+    const { data: { session }, error } = await supabase.auth.signUp({ email: email.trim(), password });
     if (error) {
       Alert.alert('Sign Up Failed', error.message);
     } else if (session) {
@@ -65,7 +80,8 @@ export default function Auth() {
           <View style={styles.logoBadge}>
             <Text style={styles.logoBadgeText}>VTO</Text>
           </View>
-          <Text style={styles.appName}>Virtual Try-On</Text>
+          <Text style={styles.appName}>VTO</Text>
+          <Text style={styles.appSubtitle}>Virtual Try On</Text>
           <Text style={styles.appTagline}>AI Fashion Studio</Text>
         </View>
 
@@ -155,6 +171,7 @@ const styles = StyleSheet.create({
   },
   logoBadgeText: { color: '#4a90d0', fontSize: 18, fontWeight: '900', letterSpacing: 1 },
   appName: { color: '#ffffff', fontSize: 26, fontWeight: '800', letterSpacing: 0.4 },
+  appSubtitle: { color: '#e879a0', fontSize: 11, fontWeight: '600', letterSpacing: 1.2, marginTop: 4, textAlign: 'center' },
   appTagline: { color: '#52525b', fontSize: 13, marginTop: 4, fontWeight: '500' },
 
   modeToggle: {
