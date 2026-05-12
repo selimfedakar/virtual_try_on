@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Virtual Try-On",
+    "name": "VTO",
     "slug": "ai-vto-mobile",
     "scheme": "aivtomobile",
     "version": "1.0.0",
@@ -18,9 +18,9 @@
       "bundleIdentifier": "com.fedakar.virtualtryon",
       "buildNumber": "1",
       "infoPlist": {
-        "NSCameraUsageDescription": "Virtual Try-On uses your camera to take photos of yourself for virtual clothing try-on.",
-        "NSPhotoLibraryUsageDescription": "Virtual Try-On accesses your photo library to select photos of yourself and garments for virtual try-on.",
-        "NSPhotoLibraryAddUsageDescription": "Virtual Try-On saves generated try-on images to your photo library."
+        "NSCameraUsageDescription": "VTO uses your camera to take photos of yourself for virtual clothing try-on.",
+        "NSPhotoLibraryUsageDescription": "VTO accesses your photo library to select photos of yourself and garments for virtual try-on.",
+        "NSPhotoLibraryAddUsageDescription": "VTO saves generated try-on images to your photo library."
       }
     },
     "android": {
@@ -36,7 +36,11 @@
         "android.permission.CAMERA",
         "android.permission.READ_MEDIA_IMAGES",
         "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE"
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_MEDIA_AUDIO"
       ]
     },
     "web": {
@@ -47,15 +51,25 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Virtual Try-On accesses your photos to select garments and personal photos for virtual try-on.",
-          "cameraPermission": "Virtual Try-On uses your camera to take photos for virtual try-on."
+          "photosPermission": "VTO accesses your photos to select garments and personal photos for virtual try-on.",
+          "cameraPermission": "VTO uses your camera to take photos for virtual try-on."
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "VTO saves your generated try-on images to your photo library.",
+          "savePhotosPermission": "VTO saves your generated try-on images to your photo library.",
+          "isAccessMediaLocationEnabled": false
         }
       ]
     ],
     "extra": {
       "eas": {
-        "projectId": ""
-      }
-    }
+        "projectId": "e7b7f796-f302-4f3f-8b4c-fa6e55c03531"
+      },
+      "router": {}
+    },
+    "owner": "selimfedakar"
   }
 }
