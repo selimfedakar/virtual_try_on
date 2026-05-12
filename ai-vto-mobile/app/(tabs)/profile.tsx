@@ -8,6 +8,16 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../../src/lib/supabase';
 import { useRouter } from 'expo-router';
 import { useProfile } from '../../src/context/ProfileContext';
+import { uploadProfilePhoto } from '../../src/lib/storage';
+
+function isValidHeight(v: string) {
+  const n = parseFloat(v);
+  return v === '' || (!isNaN(n) && n >= 50 && n <= 250);
+}
+function isValidWeight(v: string) {
+  const n = parseFloat(v);
+  return v === '' || (!isNaN(n) && n >= 20 && n <= 300);
+}
 
 export default function Profile() {
   const router = useRouter();
@@ -19,6 +29,8 @@ export default function Profile() {
   const [weight, setWeight] = useState(profile.weight);
   const [gender, setGender] = useState(profile.gender || 'Male');
   const [saving, setSaving] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -46,11 +58,33 @@ export default function Profile() {
       quality: 0.85,
     });
     if (!result.canceled) {
-      await updatePhoto(result.assets[0].uri);
+      const localUri = result.assets[0].uri;
+      setUploadingPhoto(true);
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const cloudUrl = await uploadProfilePhoto(localUri, user.id);
+          await updatePhoto(cloudUrl);
+        } else {
+          await updatePhoto(localUri);
+        }
+      } catch {
+        await updatePhoto(localUri);
+      } finally {
+        setUploadingPhoto(false);
+      }
     }
   };
 
   const handleSave = async () => {
+    if (height && !isValidHeight(height)) {
+      Alert.alert('Invalid height', 'Please enter a height between 50 and 250 cm.');
+      return;
+    }
+    if (weight && !isValidWeight(weight)) {
+      Alert.alert('Invalid weight', 'Please enter a weight between 20 and 300 kg.');
+      return;
+    }
     setSaving(true);
     await updateProfile({ name, height, weight, gender });
     setSaving(false);
@@ -75,6 +109,32 @@ export default function Profile() {
     );
   };
 
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      'Delete Account',
+      'This will permanently delete all your try-ons and profile data. This action cannot be undone.\n\nAre you sure?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete Account',
+          style: 'destructive',
+          onPress: async () => {
+            setDeletingAccount(true);
+            try {
+              await supabase.rpc('delete_user_data');
+              await supabase.auth.signOut();
+              router.replace('/auth');
+            } catch {
+              Alert.alert('Error', 'Failed to delete your account. Please try again or contact support.');
+            } finally {
+              setDeletingAccount(false);
+            }
+          },
+        },
+      ],
+    );
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar style="light" />
@@ -90,8 +150,12 @@ export default function Profile() {
       <ScrollView contentContainerStyle={styles.scroll}>
         {/* Profile Photo */}
         <View style={styles.photoSection}>
-          <TouchableOpacity style={styles.photoCircle} onPress={pickProfilePhoto}>
-            {profile.photoUri ? (
+          <TouchableOpacity style={styles.photoCircle} onPress={pickProfilePhoto} disabled={uploadingPhoto}>
+            {uploadingPhoto ? (
+              <View style={styles.photoPlaceholder}>
+                <ActivityIndicator color="#ffffff" />
+              </View>
+            ) : profile.photoUri ? (
               <Image source={{ uri: profile.photoUri }} style={styles.photoImage} />
             ) : (
               <View style={styles.photoPlaceholder}>
@@ -99,10 +163,11 @@ export default function Profile() {
                 <Text style={styles.photoPlaceholderText}>Add Photo</Text>
               </View>
             )}
-            {/* Camera badge overlay */}
-            <View style={styles.cameraBadge}>
-              <Text style={{ fontSize: 14 }}>📷</Text>
-            </View>
+            {!uploadingPhoto && (
+              <View style={styles.cameraBadge}>
+                <Text style={{ fontSize: 14 }}>📷</Text>
+              </View>
+            )}
           </TouchableOpacity>
           <Text style={styles.photoHint}>Tap to upload from your phone</Text>
         </View>
@@ -141,7 +206,7 @@ export default function Profile() {
                 style={styles.fieldInput}
                 value={height}
                 onChangeText={setHeight}
-                placeholder="e.g. 175"
+                placeholder="e.g. 175 cm"
                 placeholderTextColor="#52525b"
                 keyboardType="numeric"
                 maxLength={3}
@@ -153,7 +218,7 @@ export default function Profile() {
                 style={styles.fieldInput}
                 value={weight}
                 onChangeText={setWeight}
-                placeholder="e.g. 70"
+                placeholder="e.g. 70 kg"
                 placeholderTextColor="#52525b"
                 keyboardType="numeric"
                 maxLength={3}
@@ -186,6 +251,24 @@ export default function Profile() {
         <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
           <Text style={styles.logoutText}>Log Out</Text>
         </TouchableOpacity>
+
+        {/* Danger Zone */}
+        <View style={styles.dangerSection}>
+          <Text style={styles.dangerTitle}>Danger Zone</Text>
+          <TouchableOpacity
+            style={[styles.deleteAccountButton, deletingAccount && { opacity: 0.6 }]}
+            onPress={handleDeleteAccount}
+            disabled={deletingAccount}
+          >
+            {deletingAccount
+              ? <ActivityIndicator color="#ef4444" />
+              : <Text style={styles.deleteAccountText}>Delete My Account</Text>
+            }
+          </TouchableOpacity>
+          <Text style={styles.dangerNote}>
+            Permanently deletes all your try-ons and profile data.
+          </Text>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -201,7 +284,7 @@ const styles = StyleSheet.create({
   backText: { color: '#ffffff', fontSize: 16, fontWeight: '600' },
   topBarTitle: { color: '#ffffff', fontSize: 17, fontWeight: 'bold' },
   scroll: { padding: 24, paddingBottom: 100 },
-  // Photo
+
   photoSection: { alignItems: 'center', marginBottom: 32 },
   photoCircle: {
     width: 130, height: 130, borderRadius: 65,
@@ -218,7 +301,7 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   photoHint: { color: '#52525b', fontSize: 13 },
-  // Sections
+
   section: {
     backgroundColor: '#111111', borderRadius: 20, padding: 20,
     borderWidth: 1, borderColor: '#1a1a1a', marginBottom: 16,
@@ -245,7 +328,7 @@ const styles = StyleSheet.create({
   toggleActive: { backgroundColor: '#ffffff' },
   toggleTextOn: { color: '#000000', fontSize: 14, fontWeight: '600' },
   toggleTextOff: { color: '#a1a1aa', fontSize: 14, fontWeight: '600' },
-  // Buttons
+
   saveButton: {
     backgroundColor: '#ffffff', padding: 18, borderRadius: 100,
     alignItems: 'center', marginBottom: 14,
@@ -254,6 +337,23 @@ const styles = StyleSheet.create({
   logoutButton: {
     backgroundColor: 'transparent', padding: 18, borderRadius: 100,
     alignItems: 'center', borderWidth: 1, borderColor: '#3f3f46',
+    marginBottom: 32,
   },
   logoutText: { color: '#ef4444', fontSize: 16, fontWeight: '700' },
+
+  dangerSection: {
+    borderTopWidth: 1, borderTopColor: '#1a1a1a', paddingTop: 24,
+    alignItems: 'center',
+  },
+  dangerTitle: {
+    color: '#3f3f46', fontSize: 11, fontWeight: '700', letterSpacing: 1.5,
+    textTransform: 'uppercase', marginBottom: 14,
+  },
+  deleteAccountButton: {
+    paddingVertical: 14, paddingHorizontal: 28,
+    borderRadius: 100, borderWidth: 1, borderColor: '#3f1a1a',
+    backgroundColor: '#0a0000', marginBottom: 8,
+  },
+  deleteAccountText: { color: '#ef4444', fontSize: 15, fontWeight: '600' },
+  dangerNote: { color: '#3f3f46', fontSize: 12, textAlign: 'center' },
 });

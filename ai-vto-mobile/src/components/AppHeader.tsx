@@ -51,7 +51,7 @@ export default function AppHeader() {
           <Text style={styles.hamburger}>☰</Text>
         </TouchableOpacity>
 
-        <Text style={styles.logo}>Virtual Try-On</Text>
+        <Text style={styles.logo}>VTO</Text>
 
         <TouchableOpacity
           style={styles.iconBtn}
@@ -85,8 +85,8 @@ export default function AppHeader() {
                   <Text style={{ fontSize: 32 }}>👤</Text>
                 </View>
               )}
-              <Text style={styles.drawerBrand}>Virtual Try-On</Text>
-              <Text style={styles.drawerSub}>AI Fashion Studio</Text>
+              <Text style={styles.drawerBrand}>VTO</Text>
+              <Text style={styles.drawerSub}>Virtual Try-On · AI Fashion Studio</Text>
             </View>
 
             <View style={{ flex: 1 }}>
