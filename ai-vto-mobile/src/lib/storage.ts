@@ -1,36 +1,63 @@
 import { supabase } from './supabase';
+import * as FileSystem from 'expo-file-system/legacy';
 
-const BUCKET = 'try-ons';
+const TRY_ONS_BUCKET = 'try-ons';
+const AVATARS_BUCKET = 'avatars';
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL!;
+const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
 
-/**
- * Downloads a Replicate CDN image and uploads it to Supabase Storage.
- * Falls back to the original (temporary) URL if the bucket doesn't exist
- * or any error occurs — so saves always succeed in some form.
- *
- * To enable permanent storage: create a public bucket called "try-ons"
- * in your Supabase dashboard → Storage.
- */
-export async function uploadTryOnImage(
-  imageUrl: string,
-  userId: string,
+// Native-level binary upload — avoids the fetch().blob() empty-blob bug on React Native
+async function nativeUpload(
+  localUri: string,
+  bucket: string,
+  path: string,
+  upsert: boolean,
 ): Promise<string> {
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token ?? SUPABASE_ANON_KEY;
+
+  const res = await FileSystem.uploadAsync(
+    `${SUPABASE_URL}/storage/v1/object/${bucket}/${path}`,
+    localUri,
+    {
+      httpMethod: 'POST',
+      uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        apikey: SUPABASE_ANON_KEY,
+        'Content-Type': 'image/jpeg',
+        'x-upsert': upsert ? 'true' : 'false',
+      },
+    },
+  );
+
+  if (res.status !== 200 && res.status !== 201) {
+    throw new Error(`storage upload failed: ${res.status}`);
+  }
+
+  const { data } = supabase.storage.from(bucket).getPublicUrl(path);
+  return data.publicUrl;
+}
+
+export async function uploadTryOnImage(imageUrl: string, userId: string): Promise<string> {
   try {
-    const response = await fetch(imageUrl);
-    if (!response.ok) throw new Error('fetch failed');
-
-    const blob = await response.blob();
     const path = `${userId}/${Date.now()}.jpg`;
+    const tmpPath = `${FileSystem.cacheDirectory}vto_tmp.jpg`;
 
-    const { data, error } = await supabase.storage
-      .from(BUCKET)
-      .upload(path, blob, { contentType: 'image/jpeg', upsert: false });
+    // Download Replicate CDN URL to local file first — reliable on all Expo versions
+    await FileSystem.downloadAsync(imageUrl, tmpPath);
 
-    if (error) throw error;
-
-    const { data: urlData } = supabase.storage.from(BUCKET).getPublicUrl(data.path);
-    return urlData.publicUrl;
+    return await nativeUpload(tmpPath, TRY_ONS_BUCKET, path, false);
   } catch {
-    // Bucket not set up yet — use the Replicate URL as fallback
     return imageUrl;
+  }
+}
+
+export async function uploadProfilePhoto(localUri: string, userId: string): Promise<string> {
+  try {
+    const path = `${userId}/avatar.jpg`;
+    return await nativeUpload(localUri, AVATARS_BUCKET, path, true);
+  } catch {
+    return localUri;
   }
 }
