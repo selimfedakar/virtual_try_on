@@ -26,18 +26,28 @@ export async function GET(
     }
 
     const data = await res.json();
+    console.log('[Fashn.ai] Status response:', JSON.stringify(data));
 
     const statusMap: Record<string, string> = {
       starting: 'starting',
+      in_queue: 'starting',
       processing: 'processing',
       completed: 'succeeded',
       failed: 'failed',
+      error: 'failed',
     };
+
+    // Fashn.ai returns output inside outputs or output array
+    const generatedImage =
+      data.outputs?.[0] ??
+      data.output?.[0] ??
+      data.outputs?.result ??
+      null;
 
     return NextResponse.json({
       success: true,
       status: statusMap[data.status] ?? data.status,
-      data: { generatedImage: data.output?.[0] ?? null },
+      data: { generatedImage },
     });
 
   } catch (error: any) {
