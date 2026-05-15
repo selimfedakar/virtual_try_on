@@ -20,20 +20,25 @@ export async function POST(req: Request) {
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     if (authError || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    // Quota check (free tier: 3 generations/day)
-    const { data: allowed, error: quotaError } = await supabase.rpc(
-      'check_and_increment_generation',
-      { p_user_id: user.id },
-    );
-    if (quotaError || !allowed) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'daily_limit_reached',
-          message: 'You have used your 3 free generations today. Upgrade to Premium for unlimited access.',
-        },
-        { status: 429 },
+    // Admin bypass — unlimited generations for whitelisted accounts
+    const ADMIN_EMAILS = ['selimfedakar1@gmail.com'];
+    const isAdmin = ADMIN_EMAILS.includes(user.email ?? '');
+
+    if (!isAdmin) {
+      const { data: allowed, error: quotaError } = await supabase.rpc(
+        'check_and_increment_generation',
+        { p_user_id: user.id },
       );
+      if (quotaError || !allowed) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: 'daily_limit_reached',
+            message: 'You have used your 5 free generations today. Upgrade to Premium for unlimited access.',
+          },
+          { status: 429 },
+        );
+      }
     }
 
     // Fashn.ai — virtual try-on specific API, faster and more accurate than IDM-VTON
