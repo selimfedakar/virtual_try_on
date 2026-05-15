@@ -50,7 +50,6 @@ export async function POST(req: Request) {
         model_image: baseImage,
         garment_image: garments[0].image,
         category: 'tops',
-        nsfw_filter: true,
         garment_photo_type: 'auto',
       },
       webhook_url: webhookUrl,
