@@ -40,17 +40,13 @@ async function nativeUpload(
 }
 
 export async function uploadTryOnImage(imageUrl: string, userId: string): Promise<string> {
-  try {
-    const path = `${userId}/${Date.now()}.jpg`;
-    const tmpPath = `${FileSystem.cacheDirectory}vto_tmp.jpg`;
+  const path = `${userId}/${Date.now()}.jpg`;
+  const tmpPath = `${FileSystem.cacheDirectory}vto_tmp.jpg`;
 
-    // Download Replicate CDN URL to local file first — reliable on all Expo versions
-    await FileSystem.downloadAsync(imageUrl, tmpPath);
+  // Download Replicate CDN URL to local file first — reliable on all Expo versions
+  await FileSystem.downloadAsync(imageUrl, tmpPath);
 
-    return await nativeUpload(tmpPath, TRY_ONS_BUCKET, path, false);
-  } catch {
-    return imageUrl;
-  }
+  return await nativeUpload(tmpPath, TRY_ONS_BUCKET, path, false);
 }
 
 export async function uploadProfilePhoto(localUri: string, userId: string): Promise<string> {
