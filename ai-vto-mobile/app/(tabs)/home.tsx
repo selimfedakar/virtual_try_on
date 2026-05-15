@@ -7,20 +7,20 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
 import * as FileSystem from 'expo-file-system/legacy';
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { useState, useRef, useEffect } from 'react';
 import { supabase } from '../../src/lib/supabase';
 import AppHeader from '../../src/components/AppHeader';
+import PaywallModal from '../../src/components/PaywallModal';
 import {
-  getSavedPhotos, savePhoto, deletePhoto,
-  readPhotoAsBase64, SavedPhoto,
+  getSavedPhotos, savePhoto, deletePhoto, SavedPhoto,
 } from '../../src/lib/savedPhotos';
 import { uploadTryOnImage } from '../../src/lib/storage';
 import { saveGarment } from '../../src/lib/savedGarments';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL ?? 'https://virtual-try-on-three-sage.vercel.app';
-const GENERATE_TIMEOUT_MS = 15_000;
-const POLL_INTERVAL_MS = 3_000;
-const POLL_MAX_ATTEMPTS = 30;
+const GENERATE_TIMEOUT_MS = 30_000;
+const REALTIME_TIMEOUT_MS = 180_000;
 
 const STEPS = [
   { num: '1', icon: '📷', label: 'Your Photo' },
@@ -28,6 +28,15 @@ const STEPS = [
   { num: '3', icon: '🤖', label: 'AI Generate' },
   { num: '4', icon: '✨', label: 'Result' },
 ];
+
+async function compressToBase64(uri: string): Promise<string> {
+  const result = await manipulateAsync(
+    uri,
+    [{ resize: { width: 768 } }],
+    { compress: 0.75, format: SaveFormat.JPEG, base64: true },
+  );
+  return result.base64!;
+}
 
 export default function Home() {
   const [savedPhotos, setSavedPhotos] = useState<SavedPhoto[]>([]);
@@ -39,6 +48,7 @@ export default function Home() {
   const [resultImage, setResultImage] = useState<string | null>(null);
   const [showDeleteModal, setShowDeleteModal] = useState<SavedPhoto | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [showPaywall, setShowPaywall] = useState(false);
 
   const scanAnim = useRef(new Animated.Value(0)).current;
   const glowAnim = useRef(new Animated.Value(0.4)).current;
@@ -102,18 +112,16 @@ export default function Home() {
 
   const pickGarment = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [3, 4], quality: 0.8, base64: true,
+      mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [3, 4], quality: 0.5,
     });
     if (!result.canceled) {
       const uri = result.assets[0].uri;
       setGarmentUri(uri);
-      setGarmentBase64(result.assets[0].base64 ?? null);
       setResultImage(null);
       saveGarment(uri).catch(() => {});
+      compressToBase64(uri).then(b64 => setGarmentBase64(b64)).catch(() => {});
     }
   };
-
-  const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
   const handleGenerate = async () => {
     if (!selectedPhoto || !garmentBase64) return;
@@ -121,94 +129,105 @@ export default function Home() {
     setResultImage(null);
     setLoadingStep('Sending to AI...');
 
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    let realtimeTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const cleanup = () => {
+      channel?.unsubscribe();
+      if (realtimeTimeout) clearTimeout(realtimeTimeout);
+    };
+
     try {
-      const personBase64 = await readPhotoAsBase64(selectedPhoto.uri);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        Alert.alert('Session expired', 'Please sign in again.');
+        setIsGenerating(false);
+        setLoadingStep('');
+        return;
+      }
+
+      const [personBase64, garmentCompressed] = await Promise.all([
+        compressToBase64(selectedPhoto.uri),
+        Promise.resolve(garmentBase64),
+      ]);
+
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), GENERATE_TIMEOUT_MS);
+      const requestTimeout = setTimeout(() => controller.abort(), GENERATE_TIMEOUT_MS);
 
       let response: Response;
       try {
         response = await fetch(`${BACKEND_URL}/api/generate`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+          },
           signal: controller.signal,
           body: JSON.stringify({
             baseImage: `data:image/jpeg;base64,${personBase64}`,
-            garments: [{ image: `data:image/jpeg;base64,${garmentBase64}`, title: 'Mobile Upload' }],
+            garments: [{ image: `data:image/jpeg;base64,${garmentCompressed}`, title: 'Mobile Upload' }],
           }),
         });
       } finally {
-        clearTimeout(timeout);
+        clearTimeout(requestTimeout);
       }
 
       const data = await response.json();
+
+      // Quota exceeded → show paywall
+      if (!data.success && data.error === 'daily_limit_reached') {
+        setShowPaywall(true);
+        setIsGenerating(false);
+        setLoadingStep('');
+        return;
+      }
+
       if (!data.success) throw new Error(data.error ?? 'Backend returned an error');
 
       const predictionId: string = data.data.predictionId;
       setLoadingStep('AI is generating your look...');
 
-      for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt++) {
-        await sleep(POLL_INTERVAL_MS);
+      // Subscribe to Supabase Realtime — webhook broadcasts result instantly
+      channel = supabase
+        .channel(`generation:${session.user.id}`)
+        .on('broadcast', { event: 'completed' }, ({ payload }) => {
+          if (payload.predictionId !== predictionId) return;
 
-        try {
-          const statusRes = await fetch(`${BACKEND_URL}/api/predictions/${predictionId}`);
-          const statusData = await statusRes.json();
+          cleanup();
+          setResultImage(payload.imageUrl);
+          setGarmentUri(null);
+          setGarmentBase64(null);
+          setIsGenerating(false);
+          setLoadingStep('');
+        })
+        .subscribe();
 
-          if (statusData.status === 'succeeded') {
-            const replicateUrl: string = statusData.data.generatedImage;
+      // 3-minute safety timeout if webhook never arrives
+      realtimeTimeout = setTimeout(() => {
+        cleanup();
+        setIsGenerating(false);
+        setLoadingStep('');
+        Alert.alert('Timed out', 'Generation took too long. Please try again.');
+      }, REALTIME_TIMEOUT_MS);
 
-            // Show result immediately — do not block on Supabase upload
-            setResultImage(replicateUrl);
-            setGarmentUri(null);
-            setGarmentBase64(null);
+      // Function returns here — result arrives via Realtime callback above
+      return;
 
-            // Background save (fire-and-forget)
-            (async () => {
-              try {
-                const { data: { user } } = await supabase.auth.getUser();
-                if (user) {
-                  const supabaseUrl = await uploadTryOnImage(replicateUrl, user.id);
-                  await supabase.from('generations').insert({
-                    user_id: user.id,
-                    base_image_url: 'saved_on_device',
-                    garment_image_url: 'data_uri_omitted',
-                    garment_title: 'Mobile Upload',
-                    generated_image_url: supabaseUrl,
-                  });
-                }
-              } catch {
-                // background save failure is non-critical
-              }
-            })();
-
-            return;
-          }
-
-          if (statusData.status === 'failed' || statusData.status === 'canceled') {
-            throw new Error(`Generation ${statusData.status}: ${statusData.error ?? 'unknown'}`);
-          }
-        } catch (pollErr: any) {
-          // Skip transient network errors during polling — only rethrow hard failures
-          if (pollErr.message?.startsWith('Generation')) throw pollErr;
-        }
-      }
-      throw new Error('Generation timed out. Please try again.');
     } catch (err: any) {
+      cleanup();
+      setIsGenerating(false);
+      setLoadingStep('');
+
       const isNetworkError =
         err.name === 'AbortError' ||
         err.message?.toLowerCase().includes('network') ||
         err.message?.toLowerCase().includes('fetch');
+
       if (isNetworkError) {
-        Alert.alert(
-          'Connection Failed',
-          'Could not reach the server. Please check your internet connection and try again.',
-        );
+        Alert.alert('Connection Failed', 'Could not reach the server. Please check your internet connection and try again.');
       } else {
         Alert.alert('Error', err.message ?? 'Something went wrong.');
       }
-    } finally {
-      setIsGenerating(false);
-      setLoadingStep('');
     }
   };
 
@@ -221,7 +240,6 @@ export default function Home() {
         Alert.alert('Permission needed', 'Photo library access is required to save images.');
         return;
       }
-      // iOS requires a local file path — download first
       const localUri = FileSystem.cacheDirectory + 'tryon_save.jpg';
       const { uri } = await FileSystem.downloadAsync(resultImage, localUri);
       await MediaLibrary.saveToLibraryAsync(uri);
@@ -235,7 +253,7 @@ export default function Home() {
 
   const canGenerate = selectedPhoto !== null && garmentBase64 !== null && !isGenerating;
 
-  // ── Result / AR screen ─────────────────────────────────────────────
+  // ── Result / AR screen ──────────────────────────────────────────────
   if (resultImage) {
     const scanY = scanAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 450] });
     return (
@@ -279,11 +297,18 @@ export default function Home() {
     );
   }
 
-  // ── Main screen ────────────────────────────────────────────────────
+  // ── Main screen ─────────────────────────────────────────────────────
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar style="light" />
       <AppHeader />
+
+      <PaywallModal
+        visible={showPaywall}
+        onClose={() => setShowPaywall(false)}
+        onUpgraded={() => { setShowPaywall(false); Alert.alert('Welcome to Premium!', 'Unlimited generations activated. Enjoy!'); }}
+      />
+
       <ScrollView contentContainerStyle={{ paddingBottom: 110 }}>
 
         {/* How it works guide */}
@@ -404,7 +429,7 @@ export default function Home() {
           <View style={styles.loadingBox}>
             <ActivityIndicator size="large" color="#ffffff" />
             <Text style={styles.loadingTitle}>{loadingStep}</Text>
-            <Text style={styles.loadingSubtitle}>This takes about 20–30 seconds.</Text>
+            <Text style={styles.loadingSubtitle}>This takes about 10–20 seconds.</Text>
             <Text style={styles.loadingSignature}>_fedakar's product, always for something better!</Text>
           </View>
         )}
