@@ -43,7 +43,7 @@ FEATURES
 → Photorealistic AI try-on powered by state-of-the-art models
 → Closet: your personal history of every generated look
 → Fit Analysis: understand your measurements and proportions
-→ AI Stylist: chat-based style recommendations tailored to you
+→ Style Guide: curated outfit ideas to help you wear any garment 3 different ways
 → Share tab: pick your best look and post it anywhere
 
 Whether you're refreshing your wardrobe, shopping online, or exploring a new style — VTO is your personal AI fashion studio, always in your pocket.
@@ -114,6 +114,26 @@ ascAppId     →  App Store Connect'te uygulama oluşturduktan sonra
 
 1. eas build --platform ios --profile production
 2. eas submit --platform ios
+
+
+────────────────────────────────────────────────────────────────────────────────
+  NOTES FOR APP REVIEW  (App Store Connect'e aynen kopyala)
+────────────────────────────────────────────────────────────────────────────────
+
+Demo Account (pre-created, ready to use):
+  Email:    fedakarvto_example@gmail.com
+  Password: Review2026!
+
+Steps to test:
+1. Open the app and sign in with the credentials above.
+2. On the Home tab, tap "Add Photo" to upload a person photo.
+3. Tap "Add Garment" to upload a clothing image.
+4. Tap "Generate" — AI produces a virtual try-on result in ~20-60 seconds.
+5. Save the result to your camera roll or visit the Closet tab to see past results.
+6. Tap the Stylist tab to get AI-powered style advice.
+
+Note: The AI generation step calls an external API (Replicate) and may take
+up to 60 seconds depending on server load. This is expected behavior.
 
 
 ================================================================================
