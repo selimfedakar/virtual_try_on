@@ -26,14 +26,17 @@ ALTER TABLE public.profiles
 -- RLS (zaten açıksa hata vermez)
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY IF NOT EXISTS "Users can view their own profile"
-  ON public.profiles FOR SELECT USING (auth.uid() = id);
-
-CREATE POLICY IF NOT EXISTS "Users can insert their own profile"
-  ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id);
-
-CREATE POLICY IF NOT EXISTS "Users can update their own profile"
-  ON public.profiles FOR UPDATE USING (auth.uid() = id);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename='profiles' AND policyname='Users can view their own profile') THEN
+    CREATE POLICY "Users can view their own profile" ON public.profiles FOR SELECT USING (auth.uid() = id);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename='profiles' AND policyname='Users can insert their own profile') THEN
+    CREATE POLICY "Users can insert their own profile" ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename='profiles' AND policyname='Users can update their own profile') THEN
+    CREATE POLICY "Users can update their own profile" ON public.profiles FOR UPDATE USING (auth.uid() = id);
+  END IF;
+END $$;
 
 -- Auto-create profile on signup
 CREATE OR REPLACE FUNCTION public.handle_new_user()
@@ -56,7 +59,7 @@ CREATE OR REPLACE FUNCTION public.check_and_increment_generation(p_user_id uuid)
 RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER AS $$
 DECLARE
   v_profile    profiles%ROWTYPE;
-  FREE_LIMIT   CONSTANT int := 3;
+  FREE_LIMIT   CONSTANT int := 5;
 BEGIN
   SELECT * INTO v_profile FROM profiles WHERE id = p_user_id FOR UPDATE;
 

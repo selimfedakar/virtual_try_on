@@ -76,7 +76,7 @@ export default function PaywallModal({ visible, onClose, onUpgraded }: PaywallMo
           <Text style={styles.badge}>FREE LIMIT REACHED</Text>
           <Text style={styles.title}>Upgrade to Premium</Text>
           <Text style={styles.subtitle}>
-            You've used your 3 free try-ons today.{'\n'}
+            You've used your 5 free try-ons today.{'\n'}
             Upgrade for unlimited generations.
           </Text>
 
