@@ -1,77 +1,49 @@
 import { NextResponse } from 'next/server';
-import Replicate from 'replicate';
 import { createClient } from '@/lib/supabase/server';
 
-export const maxDuration = 60; // Allow up to 60 seconds for Vercel Serverless execution
+export const maxDuration = 30;
 
+// Fallback polling endpoint — used if Realtime webhook hasn't delivered yet
 export async function GET(
-    request: Request,
-    { params }: { params: Promise<{ id: string }> }
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
 ) {
-    try {
-        const { id } = await params;
+  try {
+    const { id } = await params;
 
-        // Verify Authentication
-        // TEMPORARILY DISABLED for mobile app testing
-        // const supabase = await createClient();
-        // const { data: { user } } = await supabase.auth.getUser();
+    const token = request.headers.get('Authorization')?.replace('Bearer ', '');
+    if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const supabase = await createClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    if (authError || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-        // if (!user) {
-        //     return NextResponse.json(
-        //         { error: 'You must be logged in to check generation status.' },
-        //         { status: 401 }
-        //     );
-        // }
+    const res = await fetch(`https://api.fashn.ai/v1/status/${id}`, {
+      headers: { 'Authorization': `Bearer ${process.env.FASHN_API_KEY}` },
+    });
 
-        // Initialize the Replicate client
-        const replicate = new Replicate({
-            auth: process.env.REPLICATE_API_TOKEN,
-        });
-
-        // Get the prediction status from Replicate
-        const prediction = await replicate.predictions.get(id);
-
-        if (prediction?.error) {
-            return NextResponse.json(
-                { success: false, error: prediction.error },
-                { status: 500 }
-            );
-        }
-
-        let generatedImageUrl = null;
-
-        // If the prediction is successful, extract the URL
-        if (prediction.status === "succeeded" && prediction.output) {
-            generatedImageUrl = Array.isArray(prediction.output) ? prediction.output[0] : prediction.output;
-
-            // Handle Replicate SDK's FileOutput stream
-            if (generatedImageUrl && typeof generatedImageUrl.url === 'function') {
-                generatedImageUrl = generatedImageUrl.url().toString();
-            } else if (typeof generatedImageUrl !== 'string') {
-                console.error("Invalid output from Replicate:", prediction.output);
-                return NextResponse.json(
-                    { success: false, error: "Replicate returned an invalid or empty output." },
-                    { status: 500 }
-                );
-            }
-        }
-
-        return NextResponse.json({
-            success: true,
-            status: prediction.status,
-            data: {
-                generatedImage: generatedImageUrl
-            }
-        });
-
-    } catch (error: any) {
-        console.error('Prediction Check Error:', error);
-        return NextResponse.json(
-            {
-                success: false,
-                error: error.message || 'Failed to check prediction status.',
-            },
-            { status: 500 }
-        );
+    if (!res.ok) {
+      return NextResponse.json({ success: false, error: 'Failed to check status' }, { status: 500 });
     }
+
+    const data = await res.json();
+
+    const statusMap: Record<string, string> = {
+      starting: 'starting',
+      processing: 'processing',
+      completed: 'succeeded',
+      failed: 'failed',
+    };
+
+    return NextResponse.json({
+      success: true,
+      status: statusMap[data.status] ?? data.status,
+      data: { generatedImage: data.output?.[0] ?? null },
+    });
+
+  } catch (error: any) {
+    return NextResponse.json(
+      { success: false, error: error.message || 'Failed to check prediction status.' },
+      { status: 500 },
+    );
+  }
 }
