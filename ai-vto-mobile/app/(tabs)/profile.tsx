@@ -9,6 +9,8 @@ import { supabase } from '../../src/lib/supabase';
 import { useRouter } from 'expo-router';
 import { useProfile } from '../../src/context/ProfileContext';
 import { uploadProfilePhoto } from '../../src/lib/storage';
+import { clearSavedPhotos } from '../../src/lib/savedPhotos';
+import { clearSavedGarments } from '../../src/lib/savedGarments';
 
 function isValidHeight(v: string) {
   const n = parseFloat(v);
@@ -101,6 +103,8 @@ export default function Profile() {
           text: 'Log Out',
           style: 'destructive',
           onPress: async () => {
+            await clearSavedPhotos();
+            await clearSavedGarments();
             await supabase.auth.signOut();
             router.replace('/auth');
           },
@@ -122,6 +126,8 @@ export default function Profile() {
             setDeletingAccount(true);
             try {
               await supabase.rpc('delete_user_data');
+              await clearSavedPhotos();
+              await clearSavedGarments();
               await supabase.auth.signOut();
               router.replace('/auth');
             } catch {

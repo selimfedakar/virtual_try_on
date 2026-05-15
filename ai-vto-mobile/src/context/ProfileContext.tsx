@@ -35,9 +35,16 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     loadProfile();
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'SIGNED_IN') loadProfile();
-      if (event === 'SIGNED_OUT') setProfile(defaultProfile);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event) => {
+      if (event === 'SIGNED_IN') {
+        // Clear any stale cache from previous user before loading fresh data
+        await AsyncStorage.removeItem('antigravity_profile').catch(() => {});
+        loadProfile();
+      }
+      if (event === 'SIGNED_OUT') {
+        setProfile(defaultProfile);
+        await AsyncStorage.removeItem('antigravity_profile').catch(() => {});
+      }
     });
     return () => subscription.unsubscribe();
   }, []);

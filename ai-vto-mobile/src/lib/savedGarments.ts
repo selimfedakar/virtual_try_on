@@ -39,6 +39,10 @@ export async function saveGarment(sourceUri: string): Promise<SavedGarment> {
   return newGarment;
 }
 
+export async function clearSavedGarments(): Promise<void> {
+  await AsyncStorage.removeItem(STORAGE_KEY).catch(() => {});
+}
+
 export async function deleteGarment(id: string): Promise<SavedGarment[]> {
   const garments = await getSavedGarments();
   const target = garments.find(g => g.id === id);

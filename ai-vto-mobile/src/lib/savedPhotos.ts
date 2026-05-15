@@ -49,6 +49,10 @@ export async function deletePhoto(id: string): Promise<SavedPhoto[]> {
   return updated;
 }
 
+export async function clearSavedPhotos(): Promise<void> {
+  await AsyncStorage.removeItem(STORAGE_KEY).catch(() => {});
+}
+
 export async function readPhotoAsBase64(uri: string): Promise<string> {
   return FileSystem.readAsStringAsync(uri, {
     encoding: FileSystem.EncodingType.Base64,

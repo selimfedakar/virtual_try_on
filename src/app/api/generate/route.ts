@@ -45,7 +45,7 @@ export async function POST(req: Request) {
     const webhookUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/webhook/fashn?secret=${encodeURIComponent(process.env.FASHN_WEBHOOK_SECRET ?? '')}`;
 
     const fashnPayload = {
-      model_name: 'fashn-v1',
+      model_name: 'tryon-v1.6',
       inputs: {
         model_image: baseImage,
         garment_image: garments[0].image,
