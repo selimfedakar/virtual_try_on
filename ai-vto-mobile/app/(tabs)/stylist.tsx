@@ -1,6 +1,6 @@
 import {
   StyleSheet, Text, View, SafeAreaView, TouchableOpacity,
-  Image, ScrollView, ActivityIndicator,
+  Image, ScrollView,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
@@ -53,7 +53,6 @@ const OUTFIT_SETS: OutfitCard[] = [
 
 export default function Stylist() {
   const [garmentImage, setGarmentImage] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
   const [showResults, setShowResults] = useState(false);
 
   const pickGarment = async () => {
@@ -61,22 +60,12 @@ export default function Stylist() {
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [3, 4],
-      quality: 0.8,
+      quality: 0.5,
     });
     if (!result.canceled) {
       setGarmentImage(result.assets[0].uri);
       setShowResults(false);
     }
-  };
-
-  const handleGetSuggestions = () => {
-    if (!garmentImage) return;
-    setIsLoading(true);
-    setShowResults(false);
-    setTimeout(() => {
-      setIsLoading(false);
-      setShowResults(true);
-    }, 1800);
   };
 
   return (
@@ -85,11 +74,10 @@ export default function Stylist() {
       <AppHeader />
       <ScrollView contentContainerStyle={styles.scroll}>
         <View style={styles.header}>
-          <Text style={styles.title}>AI Stylist</Text>
-          <Text style={styles.subtitle}>3 outfit ideas for your garment</Text>
+          <Text style={styles.title}>Style Guide</Text>
+          <Text style={styles.subtitle}>3 ways to wear any garment</Text>
         </View>
 
-        {/* Garment Picker */}
         <View style={styles.imageContainer}>
           {garmentImage ? (
             <TouchableOpacity style={{ flex: 1 }} onPress={pickGarment}>
@@ -109,20 +97,11 @@ export default function Stylist() {
 
         {garmentImage && !showResults && (
           <TouchableOpacity
-            style={[styles.primaryButton, isLoading && { opacity: 0.7 }]}
-            onPress={handleGetSuggestions}
-            disabled={isLoading}
+            style={styles.primaryButton}
+            onPress={() => setShowResults(true)}
           >
-            {isLoading ? (
-              <ActivityIndicator color="#000" />
-            ) : (
-              <Text style={styles.primaryButtonText}>🪄 Get Outfit Ideas</Text>
-            )}
+            <Text style={styles.primaryButtonText}>View Outfit Ideas</Text>
           </TouchableOpacity>
-        )}
-
-        {isLoading && (
-          <Text style={styles.loadingText}>Looking at your style...</Text>
         )}
 
         {showResults && (
@@ -210,7 +189,6 @@ const styles = StyleSheet.create({
     alignItems: 'center', marginBottom: 8,
   },
   primaryButtonText: { color: '#000000', fontSize: 17, fontWeight: 'bold' },
-  loadingText: { color: '#52525b', textAlign: 'center', marginTop: 12, fontSize: 15, fontStyle: 'italic' },
   resultsSection: { gap: 0 },
   resultsHeader: { fontSize: 20, fontWeight: 'bold', color: '#ffffff', marginBottom: 16 },
   outfitCard: {
