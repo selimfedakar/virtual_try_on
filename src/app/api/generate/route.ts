@@ -37,24 +37,34 @@ export async function POST(req: Request) {
     }
 
     // Fashn.ai — virtual try-on specific API, faster and more accurate than IDM-VTON
+    const webhookUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/webhook/fashn?secret=${encodeURIComponent(process.env.FASHN_WEBHOOK_SECRET ?? '')}`;
+
+    const fashnPayload = {
+      model_image: baseImage,
+      garment_image: garments[0].image,
+      category: 'tops',
+      webhook_url: webhookUrl,
+    };
+
+    console.log('[Fashn.ai] Sending request, image sizes:', {
+      model_image_len: baseImage.length,
+      garment_image_len: garments[0].image.length,
+      webhook_url: webhookUrl,
+    });
+
     const fashnRes = await fetch('https://api.fashn.ai/v1/run', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${process.env.FASHN_API_KEY}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        model_image: baseImage,
-        garment_image: garments[0].image,
-        category: 'tops',
-        mode: 'balanced',
-        webhook: `${process.env.NEXT_PUBLIC_APP_URL}/api/webhook/fashn?secret=${process.env.FASHN_WEBHOOK_SECRET}`,
-      }),
+      body: JSON.stringify(fashnPayload),
     });
 
     if (!fashnRes.ok) {
-      const err = await fashnRes.json().catch(() => ({}));
-      throw new Error((err as any).error || (err as any).message || 'Fashn.ai request failed');
+      const errText = await fashnRes.text();
+      console.error('[Fashn.ai] BadRequest details:', fashnRes.status, errText);
+      throw new Error(`Fashn.ai ${fashnRes.status}: ${errText}`);
     }
 
     const { id: predictionId } = await fashnRes.json();
