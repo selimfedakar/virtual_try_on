@@ -132,7 +132,7 @@ Steps to test:
 5. Save the result to your camera roll or visit the Closet tab to see past results.
 6. Tap the Stylist tab to get AI-powered style advice.
 
-Note: The AI generation step calls an external API (Replicate) and may take
+Note: The AI generation step calls an external API (Fashn.ai) and may take
 up to 60 seconds depending on server load. This is expected behavior.
 
 

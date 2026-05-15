@@ -71,11 +71,11 @@ export default function PrivacyPolicy() {
             storage. Your account data and images are stored on Supabase infrastructure.
           </li>
           <li style={styles.li}>
-            <strong>Replicate</strong> (replicate.com) — AI inference for the virtual try-on model
-            (IDM-VTON). Your uploaded person and garment images are sent to Replicate for
-            processing. Please review{' '}
-            <a href="https://replicate.com/privacy" style={styles.a} target="_blank" rel="noreferrer">
-              Replicate's Privacy Policy
+            <strong>Fashn.ai</strong> (fashn.ai) — AI inference for the virtual try-on model.
+            Your uploaded person and garment images are sent to Fashn.ai for processing. Please
+            review{' '}
+            <a href="https://fashn.ai/privacy" style={styles.a} target="_blank" rel="noreferrer">
+              Fashn.ai's Privacy Policy
             </a>{' '}
             for details on how they handle inference data.
           </li>

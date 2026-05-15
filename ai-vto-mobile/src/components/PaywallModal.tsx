@@ -1,8 +1,8 @@
 import {
-  Modal, View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator,
+  Modal, View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, Linking,
 } from 'react-native';
 import { useState } from 'react';
-import Purchases, { PACKAGE_TYPE } from 'react-native-purchases';
+import Purchases, { PACKAGE_TYPE, PurchasesPackage } from 'react-native-purchases';
 import { supabase } from '../lib/supabase';
 
 interface PaywallModalProps {
@@ -13,14 +13,30 @@ interface PaywallModalProps {
 
 export default function PaywallModal({ visible, onClose, onUpgraded }: PaywallModalProps) {
   const [loading, setLoading] = useState(false);
+  const [activePackage, setActivePackage] = useState<PurchasesPackage | null>(null);
+  const [priceString, setPriceString] = useState('');
 
-  const handleUpgrade = async () => {
-    setLoading(true);
+  const loadOfferings = async () => {
     try {
       const offerings = await Purchases.getOfferings();
       const pkg = offerings.current?.availablePackages.find(
         p => p.packageType === PACKAGE_TYPE.MONTHLY,
       ) ?? offerings.current?.availablePackages[0];
+      if (pkg) {
+        setActivePackage(pkg);
+        setPriceString(pkg.product.priceString);
+      }
+    } catch {}
+  };
+
+  const handleUpgrade = async () => {
+    setLoading(true);
+    try {
+      const offerings = await Purchases.getOfferings();
+      const pkg = activePackage ?? (
+        offerings.current?.availablePackages.find(p => p.packageType === PACKAGE_TYPE.MONTHLY)
+        ?? offerings.current?.availablePackages[0]
+      );
 
       if (!pkg) {
         Alert.alert('Unavailable', 'Premium is not available in your region yet.');
@@ -68,7 +84,7 @@ export default function PaywallModal({ visible, onClose, onUpgraded }: PaywallMo
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} onShow={loadOfferings}>
       <View style={styles.overlay}>
         <View style={styles.sheet}>
           <View style={styles.handle} />
@@ -100,13 +116,25 @@ export default function PaywallModal({ visible, onClose, onUpgraded }: PaywallMo
           >
             {loading
               ? <ActivityIndicator color="#000" />
-              : <Text style={styles.upgradeBtnText}>Upgrade — $4.99 / month</Text>
+              : <Text style={styles.upgradeBtnText}>
+                Upgrade — {priceString || '$4.99'} / month
+              </Text>
             }
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.restoreBtn} onPress={handleRestore} disabled={loading}>
             <Text style={styles.restoreBtnText}>Restore Purchase</Text>
           </TouchableOpacity>
+
+          <View style={styles.legalRow}>
+            <TouchableOpacity onPress={() => Linking.openURL('https://virtual-try-on-three-sage.vercel.app/privacy')}>
+              <Text style={styles.legalLink}>Privacy Policy</Text>
+            </TouchableOpacity>
+            <Text style={styles.legalSep}> · </Text>
+            <TouchableOpacity onPress={() => Linking.openURL('https://www.apple.com/legal/internet-services/itunes/dev/stdeula/')}>
+              <Text style={styles.legalLink}>Terms of Use</Text>
+            </TouchableOpacity>
+          </View>
 
           <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
             <Text style={styles.closeBtnText}>Not now</Text>
@@ -154,6 +182,9 @@ const styles = StyleSheet.create({
   upgradeBtnText: { color: '#000000', fontSize: 16, fontWeight: 'bold' },
   restoreBtn: { paddingVertical: 10, marginBottom: 4 },
   restoreBtnText: { color: '#52525b', fontSize: 13 },
+  legalRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 4, marginTop: 8 },
+  legalLink: { color: '#52525b', fontSize: 12, textDecorationLine: 'underline' },
+  legalSep: { color: '#3f3f46', fontSize: 12 },
   closeBtn: { paddingVertical: 10 },
   closeBtnText: { color: '#3f3f46', fontSize: 13 },
 });

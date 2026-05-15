@@ -14,13 +14,20 @@
       }
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://zoxuqbuqqxracuxmwtim.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_F0LTaGAHTPcEOj7bBKLAGA_GBY7ggvP",
+        "EXPO_PUBLIC_API_URL": "https://virtual-try-on-three-sage.vercel.app",
+        "EXPO_PUBLIC_BACKEND_URL": "https://virtual-try-on-three-sage.vercel.app",
+        "EXPO_PUBLIC_REVENUECAT_IOS_KEY": "FILL_IN_PRODUCTION_REVENUECAT_KEY"
+      }
     }
   },
   "submit": {
     "production": {
       "ios": {
-        "appleTeamId": "FILL_IN",
+        "appleTeamId": "PAST7W47P5",
         "ascAppId": "FILL_IN"
       }
     }
