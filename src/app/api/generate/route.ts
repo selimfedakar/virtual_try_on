@@ -48,7 +48,7 @@ export async function POST(req: Request) {
         garment_image: garments[0].image,
         category: 'tops',
         mode: 'balanced',
-        webhook: `${process.env.NEXT_PUBLIC_APP_URL}/api/webhook/fashn`,
+        webhook: `${process.env.NEXT_PUBLIC_APP_URL}/api/webhook/fashn?secret=${process.env.FASHN_WEBHOOK_SECRET}`,
       }),
     });
 
