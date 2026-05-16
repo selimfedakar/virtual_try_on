@@ -4,7 +4,7 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { supabase } from '../../src/lib/supabase';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useFocusEffect } from 'expo-router';
 import React from 'react';
 import AppHeader from '../../src/components/AppHeader';
@@ -34,6 +34,18 @@ export default function History() {
       fetchAll();
     }, [])
   );
+
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') {
+        setGenerations([]);
+        setGarments([]);
+      } else if (event === 'SIGNED_IN') {
+        fetchAll();
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
 
   const fetchAll = async () => {
     setLoading(true);
