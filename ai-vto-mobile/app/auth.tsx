@@ -154,7 +154,6 @@ export default function Auth() {
         </View>
       </View>
 
-      <Text style={styles.footerText}>_fedakar's product, always for something better!</Text>
     </SafeAreaView>
   );
 }
