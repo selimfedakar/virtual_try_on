@@ -9,6 +9,8 @@ import * as MediaLibrary from 'expo-media-library';
 import * as FileSystem from 'expo-file-system/legacy';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { useState, useRef, useEffect } from 'react';
+import React from 'react';
+import { useFocusEffect } from 'expo-router';
 import { supabase } from '../../src/lib/supabase';
 import AppHeader from '../../src/components/AppHeader';
 import PaywallModal from '../../src/components/PaywallModal';
@@ -53,7 +55,27 @@ export default function Home() {
   const scanAnim = useRef(new Animated.Value(0)).current;
   const glowAnim = useRef(new Animated.Value(0.4)).current;
 
-  useEffect(() => { loadPhotos(); }, []);
+  // Reload photos whenever the tab is focused (covers login/switch-user scenarios)
+  useFocusEffect(
+    React.useCallback(() => { loadPhotos(); }, [])
+  );
+
+  // Clear all in-memory state immediately on logout so the next user never
+  // sees the previous user's photos/garments/results in React state.
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') {
+        setSavedPhotos([]);
+        setSelectedPhoto(null);
+        setGarmentUri(null);
+        setGarmentBase64(null);
+        setResultImage(null);
+      } else if (event === 'SIGNED_IN') {
+        loadPhotos();
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
 
   useEffect(() => {
     if (!resultImage) return;
