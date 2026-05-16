@@ -20,7 +20,7 @@
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_F0LTaGAHTPcEOj7bBKLAGA_GBY7ggvP",
         "EXPO_PUBLIC_API_URL": "https://virtual-try-on-three-sage.vercel.app",
         "EXPO_PUBLIC_BACKEND_URL": "https://virtual-try-on-three-sage.vercel.app",
-        "EXPO_PUBLIC_REVENUECAT_IOS_KEY": "FILL_IN_PRODUCTION_REVENUECAT_KEY"
+        "EXPO_PUBLIC_REVENUECAT_IOS_KEY": "appl_EJmLgcbXBfAEOYNwqXiCAehNXbQ"
       }
     }
   },
@@ -28,7 +28,7 @@
     "production": {
       "ios": {
         "appleTeamId": "PAST7W47P5",
-        "ascAppId": "FILL_IN"
+        "ascAppId": "6769989598"
       }
     }
   }
