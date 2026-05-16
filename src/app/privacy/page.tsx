@@ -82,6 +82,15 @@ export default function PrivacyPolicy() {
           <li style={styles.li}>
             <strong>Vercel</strong> (vercel.com) — web hosting for the VTO web application.
           </li>
+          <li style={styles.li}>
+            <strong>RevenueCat</strong> (revenuecat.com) — in-app purchase management and
+            subscription tracking. RevenueCat receives a pseudonymous user identifier and
+            purchase receipt data to validate and manage your subscription. Please review{' '}
+            <a href="https://www.revenuecat.com/privacy" style={styles.a} target="_blank" rel="noreferrer">
+              RevenueCat's Privacy Policy
+            </a>{' '}
+            for details.
+          </li>
         </ul>
 
         <h2 style={styles.h2}>4. Data Retention</h2>
