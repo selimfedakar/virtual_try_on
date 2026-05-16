@@ -11,14 +11,16 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json();
-    const { id: predictionId, status, output } = body;
+    console.log('[Webhook] Fashn.ai payload:', JSON.stringify(body));
+    const { id: predictionId, status } = body;
+
+    // Fashn.ai may use either "output" or "outputs" field
+    const imageUrl: string | undefined = body.output?.[0] ?? body.outputs?.[0];
 
     // Only process successful completions
-    if (status !== 'completed' || !output?.[0]) {
+    if (status !== 'completed' || !imageUrl) {
       return NextResponse.json({ received: true });
     }
-
-    const imageUrl: string = output[0];
     const supabase = createServiceClient();
 
     // Find which user triggered this prediction
@@ -42,12 +44,26 @@ export async function POST(req: Request) {
       generated_image_url: storageUrl,
     });
 
-    // Broadcast to mobile app via Supabase Realtime — replaces polling
-    await supabase.channel(`generation:${pending.user_id}`).send({
-      type: 'broadcast',
-      event: 'completed',
-      payload: { predictionId, imageUrl: storageUrl },
-    });
+    // Broadcast to mobile app via Supabase Realtime REST API
+    // (JS client .send() doesn't work reliably in serverless without subscribe())
+    await fetch(
+      `${process.env.NEXT_PUBLIC_SUPABASE_URL}/realtime/v1/api/broadcast`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY!,
+          'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY!}`,
+        },
+        body: JSON.stringify({
+          messages: [{
+            topic: `realtime:generation:${pending.user_id}`,
+            event: 'completed',
+            payload: { predictionId, imageUrl: storageUrl },
+          }],
+        }),
+      },
+    );
 
     // Clean up pending row
     await supabase.from('pending_generations').delete().eq('prediction_id', predictionId);
