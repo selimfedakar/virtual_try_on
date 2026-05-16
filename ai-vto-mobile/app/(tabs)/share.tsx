@@ -3,7 +3,7 @@ import {
   Image, ScrollView, ActivityIndicator, Share, FlatList,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useFocusEffect } from 'expo-router';
 import React from 'react';
 import { supabase } from '../../src/lib/supabase';
@@ -38,6 +38,18 @@ export default function ShareScreen() {
       loadTryOns();
     }, [])
   );
+
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') {
+        setTryOns([]);
+        setSelected(null);
+      } else if (event === 'SIGNED_IN') {
+        loadTryOns();
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
 
   const loadTryOns = async () => {
     setLoadingList(true);
