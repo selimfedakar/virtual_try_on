@@ -11,7 +11,7 @@ const NAV_ITEMS = [
   { label: 'Try On', icon: '📸', route: '/(tabs)/home' },
   { label: 'Fit Analysis', icon: '📏', route: '/(tabs)/analysis' },
   { label: 'My Closet', icon: '👕', route: '/(tabs)/history' },
-  { label: 'AI Stylist', icon: '🪄', route: '/(tabs)/stylist' },
+  { label: 'Style Guide', icon: '🪄', route: '/(tabs)/stylist' },
   { label: 'Share & Analyze', icon: '✨', route: '/(tabs)/share' },
   { label: 'Profile Settings', icon: '⚙️', route: '/(tabs)/profile' },
 ] as const;
@@ -113,9 +113,7 @@ export default function AppHeader() {
               <Text style={[styles.drawerItemLabel, { color: '#ef4444' }]}>Log Out</Text>
             </TouchableOpacity>
 
-            <Text style={styles.drawerTagline}>
-              _fedakar's product, always for something better!
-            </Text>
+            <Text style={styles.drawerTagline}>VTO · AI Fashion Studio</Text>
           </Pressable>
         </Pressable>
       </Modal>
