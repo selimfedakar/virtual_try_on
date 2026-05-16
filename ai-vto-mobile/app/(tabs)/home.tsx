@@ -480,7 +480,6 @@ export default function Home() {
             <ActivityIndicator size="large" color="#ffffff" />
             <Text style={styles.loadingTitle}>{loadingStep}</Text>
             <Text style={styles.loadingSubtitle}>This takes about 10–20 seconds.</Text>
-            <Text style={styles.loadingSignature}>_fedakar's product, always for something better!</Text>
           </View>
         )}
       </ScrollView>
