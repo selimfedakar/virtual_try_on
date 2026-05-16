@@ -1094,6 +1094,249 @@ App Store gereksinimleri karşılandı:
     TypeScript tüm stack'te (sıfır hata, strict mod)
     ESLint (Next.js konfigürasyonu)
 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  12. BUGS THAT TOOK MORE THAN TWO ITERATIONS TO CLOSE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+This section documents real production bugs that required multiple debugging
+sessions or code changes before they were fully resolved. Each entry includes
+what the symptom was, what was tried first, and what the actual root cause was.
+
+────────────────────────────────────────────────────────────────────────────────
+  BUG #1 — Supabase Realtime broadcast silently dropping in serverless
+────────────────────────────────────────────────────────────────────────────────
+  Symptom:
+    Generated images arrived via polling fallback but never via Realtime —
+    the mobile app always timed out and fell back to polling for the result.
+
+  Iteration 1 (wrong fix):
+    Used the standard Supabase JS client to broadcast:
+      supabase.channel('generation:userId').send({ type: 'broadcast', ... })
+    This compiled and ran without errors — but the broadcast was silently
+    discarded. No exception, no warning.
+
+  Iteration 2 (wrong assumption):
+    Suspected the channel name or event name was wrong. Changed naming
+    convention, added console logs, still no delivery.
+
+  Iteration 3 (root cause found):
+    supabase.channel().send() requires an active WebSocket subscription to
+    the channel before it can broadcast. Serverless functions have no
+    persistent WebSocket connections — the function spins up, executes,
+    and tears down. There is no subscription, so the broadcast is a no-op.
+
+  Fix:
+    Replaced JS client broadcast with a direct HTTP POST to Supabase's
+    Realtime REST endpoint: /realtime/v1/api/broadcast
+    This endpoint accepts broadcasts over regular HTTPS without a prior
+    subscription, making it the only viable option in serverless environments.
+
+  File changed: src/app/api/webhook/fashn/route.ts
+
+────────────────────────────────────────────────────────────────────────────────
+  BUG #2 — Fashn.ai API rejecting requests with 400 BadRequest
+────────────────────────────────────────────────────────────────────────────────
+  Symptom:
+    All generation requests failed immediately with HTTP 400. The generate
+    endpoint threw an error before Fashn.ai even started processing.
+
+  Iteration 1 (wrong model name):
+    Initial integration used model_name: 'fashn-v1' — this does not exist.
+    Fashn.ai returned 400 with no helpful error body. Fixed to 'tryon-v1.6'.
+
+  Iteration 2 (disallowed parameter):
+    After fixing the model name, added nsfw_filter: true as a safety measure.
+    Fashn.ai's tryon-v1.6 does not accept this parameter — returned 400 again.
+    The parameter is not documented as invalid; it just silently rejects it.
+
+  Iteration 3 (output field mismatch):
+    After successful generation, the webhook received a completed payload
+    but could not extract the image URL. The code assumed body.output[0]
+    but Fashn.ai sometimes returns body.outputs[0]. Added detection for both.
+
+  Fix:
+    model_name: 'tryon-v1.6', no nsfw_filter, detect both output and outputs.
+
+  File changed: src/app/api/generate/route.ts, src/app/api/webhook/fashn/route.ts
+
+────────────────────────────────────────────────────────────────────────────────
+  BUG #3 — Generated images not appearing in Closet / Share tabs
+────────────────────────────────────────────────────────────────────────────────
+  Symptom:
+    User sees the generated image on the result screen, but after navigating
+    to the Closet tab (history.tsx) the image is not listed. Sometimes it
+    appeared after a significant delay, sometimes never.
+
+  Iteration 1 (assumption: DB insert missing):
+    Verified the webhook does insert into the generations table — it did.
+    The issue appeared timing-dependent. Suspected Realtime delivery failure.
+
+  Iteration 2 (root cause found — race condition in polling path):
+    When the polling fallback delivered the result (Realtime not received),
+    the polling endpoint returned the Fashn.ai CDN URL and showed it on screen.
+    But the webhook — which actually inserts into the generations table —
+    was still processing in the background. If the user navigated to Closet
+    immediately, the DB row was not yet there.
+    Additionally: if the webhook itself failed for any reason (network error,
+    storage failure), the generations table was never populated at all, so
+    the image would never appear in Closet even after waiting.
+
+  Fix:
+    The polling endpoint now atomically claims the pending_generations row
+    (DELETE + RETURNING). If it claims the row, it does the full processing
+    itself: downloads the Fashn.ai image, uploads to Supabase Storage,
+    inserts into generations, broadcasts Realtime, deletes pending row.
+    If the webhook already claimed the row (row is gone), the polling endpoint
+    reads the permanent URL from the generations table instead.
+    Result: the image is guaranteed to be in the DB before the frontend
+    displays it, regardless of whether the webhook or polling path wins.
+
+  File changed: src/app/api/predictions/[id]/route.ts
+
+────────────────────────────────────────────────────────────────────────────────
+  BUG #4 — Previous user's data visible after account switch (data leak)
+────────────────────────────────────────────────────────────────────────────────
+  Symptom:
+    When User A logs out and User B logs in on the same device, User B sees
+    User A's saved photos (My Photos section) and garments (Closet) still
+    displayed on screen. Apple App Store review caught this as a privacy
+    violation.
+
+  Iteration 1 (partial fix — AsyncStorage):
+    On logout, clearSavedPhotos() and clearSavedGarments() were called,
+    which removed the data from AsyncStorage. This fixed the persistence
+    issue: after an app restart, User B would see a clean state.
+    But it did NOT fix the in-memory React state.
+
+  Iteration 2 (root cause found — React state persists across auth events):
+    The tab screens (home.tsx, history.tsx, share.tsx) are mounted once when
+    the app loads and stay mounted for the lifetime of the session.
+    home.tsx loaded photos via useEffect([], []) — runs only on mount.
+    After logout + login, the component does not unmount, so useEffect
+    never re-runs. The savedPhotos, garments, and generations arrays in
+    React state still held User A's data from the previous session.
+    The same applied to the selected try-on in share.tsx.
+
+  Fix:
+    Added supabase.auth.onAuthStateChange listeners to home.tsx, history.tsx,
+    and share.tsx. On SIGNED_OUT: all relevant state arrays are set to [] and
+    selections to null immediately. On SIGNED_IN: data is reloaded.
+    home.tsx also switched from useEffect (mount-only) to useFocusEffect
+    (fires on every tab focus) for photo loading, ensuring fresh data after
+    any auth transition.
+
+  Files changed:
+    ai-vto-mobile/app/(tabs)/home.tsx
+    ai-vto-mobile/app/(tabs)/history.tsx
+    ai-vto-mobile/app/(tabs)/share.tsx
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  12. İKİDEN FAZLA İTERASYON GEREKTIREN HATALAR (TÜRKÇE)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Bu bölüm, tamamen kapatılabilmesi için birden fazla hata ayıklama oturumu
+veya kod değişikliği gerektiren gerçek üretim hatalarını belgeler. Her kayıt;
+semptom, ilk denenen çözüm ve gerçek kök neden bilgisini içerir.
+
+────────────────────────────────────────────────────────────────────────────────
+  HATA #1 — Serverless'ta Supabase Realtime broadcast sessizce çalışmıyor
+────────────────────────────────────────────────────────────────────────────────
+  Semptom:
+    Üretilen görseller hiçbir zaman Realtime üzerinden gelmedi; uygulama
+    her seferinde polling fallback'e düşüyordu.
+
+  İterasyon 1 (yanlış düzeltme):
+    Standart Supabase JS istemcisiyle broadcast denendi:
+      supabase.channel('generation:userId').send(...)
+    Hatasız çalıştı ama broadcast hiçbir yere ulaşmadı. Hata yok, uyarı yok.
+
+  İterasyon 2 (yanlış varsayım):
+    Kanal adı veya event adının yanlış olduğu düşünüldü. İsimler değiştirildi,
+    log'lar eklendi — hâlâ teslim yok.
+
+  İterasyon 3 (kök neden bulundu):
+    supabase.channel().send() çalışabilmesi için önce o kanala aktif bir
+    WebSocket aboneliği gerektirir. Serverless fonksiyonlarının kalıcı
+    WebSocket bağlantısı yoktur — fonksiyon ayağa kalkar, çalışır, kapanır.
+    Abonelik olmadığı için broadcast sessizce boşa gider.
+
+  Düzeltme:
+    Supabase'in /realtime/v1/api/broadcast REST endpoint'ine doğrudan
+    HTTPS POST yapılmasına geçildi. Bu endpoint, önceden abonelik olmaksızın
+    normal HTTPS üzerinden broadcast kabul eder.
+
+────────────────────────────────────────────────────────────────────────────────
+  HATA #2 — Fashn.ai API 400 BadRequest ile istekleri reddediyor
+────────────────────────────────────────────────────────────────────────────────
+  Semptom:
+    Tüm üretim istekleri anında HTTP 400 ile başarısız oluyordu.
+
+  İterasyon 1 (yanlış model adı):
+    model_name: 'fashn-v1' kullanıldı — bu model mevcut değil.
+    Fashn.ai yardımcı bir hata mesajı olmadan 400 döndürdü. 'tryon-v1.6' olarak düzeltildi.
+
+  İterasyon 2 (izin verilmeyen parametre):
+    nsfw_filter: true eklendi. tryon-v1.6 bu parametreyi kabul etmiyor —
+    sessizce 400 döndürdü. Kaldırıldı.
+
+  İterasyon 3 (çıktı alanı uyumsuzluğu):
+    Webhook tamamlanmış payload'ı aldı ancak görsel URL'si çıkarılamadı.
+    Kod body.output[0] bekliyordu; Fashn.ai zaman zaman body.outputs[0]
+    döndürüyordu. Her ikisi de algılanacak şekilde güncellendi.
+
+────────────────────────────────────────────────────────────────────────────────
+  HATA #3 — Üretilen görseller Dolap / Share sekmelerinde görünmüyor
+────────────────────────────────────────────────────────────────────────────────
+  Semptom:
+    Kullanıcı sonuç ekranında görseli görüyor ama Dolap'a geçince görsel
+    listede yok. Bazen gecikmeli çıkıyor, bazen hiç çıkmıyor.
+
+  İterasyon 1 (yanlış varsayım):
+    Webhook'un generations tablosuna yazmadığı düşünüldü — yazdığı doğrulandı.
+    Sorun zamanlama bağımlı görünüyordu.
+
+  İterasyon 2 (kök neden bulundu — polling yolunda yarış koşulu):
+    Polling, Fashn.ai CDN URL'sini ekrana gösteriyordu.
+    Ancak webhook (DB'ye yazan) hâlâ arka planda işleniyordu.
+    Kullanıcı hemen Dolap'a geçerse satır henüz yoktu.
+    Ayrıca webhook herhangi bir nedenle başarısız olursa generations tablosu
+    hiç dolmuyordu — görsel sonsuza kadar kayboluyordu.
+
+  Düzeltme:
+    Polling endpoint'i pending_generations satırını atomik olarak sahipleniyor
+    (DELETE + RETURNING). Satırı o alırsa: indir, Storage'a yükle, DB'ye yaz,
+    broadcast gönder. Webhook almışsa: generations tablosundan kalıcı URL'yi oku.
+    Sonuç: görsel frontend'e ulaşmadan önce DB'de garantili olarak var oluyor.
+
+────────────────────────────────────────────────────────────────────────────────
+  HATA #4 — Hesap değiştirince önceki kullanıcının verileri görünüyor
+────────────────────────────────────────────────────────────────────────────────
+  Semptom:
+    Kullanıcı A çıkış yapıp Kullanıcı B giriş yapınca, B ekranda A'nın
+    fotoğraflarını ve kıyafetlerini görüyordu. Apple App Store denetiminde
+    gizlilik ihlali olarak işaretlendi.
+
+  İterasyon 1 (kısmi düzeltme — AsyncStorage):
+    Çıkışta clearSavedPhotos() ve clearSavedGarments() çağrıldı.
+    Uygulama yeniden başlatıldığında B temiz ekran görüyordu.
+    Ama belleğindeki React state temizlenmedi.
+
+  İterasyon 2 (kök neden bulundu — React state auth olayları arasında kaldı):
+    Sekme ekranları (home.tsx, history.tsx, share.tsx) bir kez monte edilip
+    uygulama boyunca monte kalmaya devam eder.
+    home.tsx, fotoğrafları useEffect([], []) ile yüklüyordu — sadece monte
+    olduğunda çalışır. Çıkış → giriş sonrasında bileşen monte edilmediğinden
+    useEffect yeniden çalışmıyor; savedPhotos, garments, generations dizileri
+    A'nın verisini tutmaya devam ediyordu.
+
+  Düzeltme:
+    Tüm sekme ekranlarına supabase.auth.onAuthStateChange listener'ı eklendi.
+    SIGNED_OUT'ta: tüm state dizileri [] ve seçimler null'a çekilir.
+    SIGNED_IN'da: veri yeniden yüklenir. home.tsx ayrıca useEffect yerine
+    useFocusEffect ile fotoğraf yüklüyor (her odaklanmada taze yükleme).
+
+
 ================================================================================
   _fedakar's product, always for something better!
 ================================================================================
