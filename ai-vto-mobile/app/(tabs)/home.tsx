@@ -131,10 +131,12 @@ export default function Home() {
 
     let channel: ReturnType<typeof supabase.channel> | null = null;
     let realtimeTimeout: ReturnType<typeof setTimeout> | null = null;
+    let pollInterval: ReturnType<typeof setInterval> | null = null;
 
     const cleanup = () => {
       channel?.unsubscribe();
       if (realtimeTimeout) clearTimeout(realtimeTimeout);
+      if (pollInterval) clearInterval(pollInterval);
     };
 
     try {
@@ -202,7 +204,33 @@ export default function Home() {
         })
         .subscribe();
 
-      // 3-minute safety timeout if webhook never arrives
+      // Polling fallback — fires every 10s if Realtime broadcast doesn't arrive
+      let pollAttempts = 0;
+      pollInterval = setInterval(async () => {
+        pollAttempts++;
+        if (pollAttempts > 18) return; // max 3 min
+        try {
+          const res = await fetch(`${BACKEND_URL}/api/predictions/${predictionId}`, {
+            headers: { 'Authorization': `Bearer ${session.access_token}` },
+          });
+          const d = await res.json();
+          if (d.success && d.status === 'succeeded' && d.data?.generatedImage) {
+            cleanup();
+            setResultImage(d.data.generatedImage);
+            setGarmentUri(null);
+            setGarmentBase64(null);
+            setIsGenerating(false);
+            setLoadingStep('');
+          } else if (d.success && d.status === 'failed') {
+            cleanup();
+            Alert.alert('Error', 'AI generation failed. Please try again.');
+            setIsGenerating(false);
+            setLoadingStep('');
+          }
+        } catch {}
+      }, 10_000);
+
+      // 3-minute safety timeout if neither Realtime nor polling delivers
       realtimeTimeout = setTimeout(() => {
         cleanup();
         setIsGenerating(false);
@@ -210,7 +238,7 @@ export default function Home() {
         Alert.alert('Timed out', 'Generation took too long. Please try again.');
       }, REALTIME_TIMEOUT_MS);
 
-      // Function returns here — result arrives via Realtime callback above
+      // Function returns here — result arrives via Realtime callback or polling above
       return;
 
     } catch (err: any) {
