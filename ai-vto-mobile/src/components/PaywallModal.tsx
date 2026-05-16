@@ -117,7 +117,7 @@ export default function PaywallModal({ visible, onClose, onUpgraded }: PaywallMo
             {loading
               ? <ActivityIndicator color="#000" />
               : <Text style={styles.upgradeBtnText}>
-                Upgrade — {priceString || '$4.99'} / month
+                Upgrade — {priceString}
               </Text>
             }
           </TouchableOpacity>
@@ -135,6 +135,10 @@ export default function PaywallModal({ visible, onClose, onUpgraded }: PaywallMo
               <Text style={styles.legalLink}>Terms of Use</Text>
             </TouchableOpacity>
           </View>
+
+          <Text style={styles.cancelNote}>
+            Subscriptions can be cancelled anytime in{'\n'}iOS Settings → Apple ID → Subscriptions.
+          </Text>
 
           <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
             <Text style={styles.closeBtnText}>Not now</Text>
@@ -185,6 +189,9 @@ const styles = StyleSheet.create({
   legalRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 4, marginTop: 8 },
   legalLink: { color: '#52525b', fontSize: 12, textDecorationLine: 'underline' },
   legalSep: { color: '#3f3f46', fontSize: 12 },
+  cancelNote: {
+    color: '#3f3f46', fontSize: 11, textAlign: 'center', lineHeight: 17, marginBottom: 4,
+  },
   closeBtn: { paddingVertical: 10 },
   closeBtnText: { color: '#3f3f46', fontSize: 13 },
 });
