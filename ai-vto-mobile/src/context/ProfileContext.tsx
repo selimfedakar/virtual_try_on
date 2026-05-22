@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
+import { clearSavedPhotos } from '../lib/savedPhotos';
+import { clearSavedGarments } from '../lib/savedGarments';
 
 export interface ProfileData {
   photoUri: string | null;
@@ -44,6 +46,8 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
       if (event === 'SIGNED_OUT') {
         setProfile(defaultProfile);
         await AsyncStorage.removeItem('antigravity_profile').catch(() => {});
+        await clearSavedPhotos();
+        await clearSavedGarments();
       }
     });
     return () => subscription.unsubscribe();
