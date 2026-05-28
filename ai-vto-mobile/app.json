@@ -20,7 +20,8 @@
       "infoPlist": {
         "NSCameraUsageDescription": "VTO uses your camera to take photos of yourself for virtual clothing try-on.",
         "NSPhotoLibraryUsageDescription": "VTO accesses your photo library to select photos of yourself and garments for virtual try-on.",
-        "NSPhotoLibraryAddUsageDescription": "VTO saves generated try-on images to your photo library."
+        "NSPhotoLibraryAddUsageDescription": "VTO saves generated try-on images to your photo library.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
