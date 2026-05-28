@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Image,
   Modal, Alert, Pressable,
@@ -21,6 +21,15 @@ export default function AppHeader() {
   const { profile } = useProfile();
   const [showDrawer, setShowDrawer] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [isGuest, setIsGuest] = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => setIsGuest(!session));
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
+      setIsGuest(!session);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
 
   const confirmLogout = () => {
     Alert.alert(
@@ -53,19 +62,29 @@ export default function AppHeader() {
 
         <Text style={styles.logo}>VTO</Text>
 
-        <TouchableOpacity
-          style={styles.iconBtn}
-          onPress={() => setShowProfileMenu(true)}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-        >
-          {profile.photoUri ? (
-            <Image source={{ uri: profile.photoUri }} style={styles.avatar} />
-          ) : (
-            <View style={styles.avatarDefault}>
-              <Text style={{ fontSize: 16 }}>👤</Text>
-            </View>
-          )}
-        </TouchableOpacity>
+        {isGuest ? (
+          <TouchableOpacity
+            style={styles.signInBtn}
+            onPress={() => router.push('/auth')}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          >
+            <Text style={styles.signInBtnText}>Sign In</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            style={styles.iconBtn}
+            onPress={() => setShowProfileMenu(true)}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          >
+            {profile.photoUri ? (
+              <Image source={{ uri: profile.photoUri }} style={styles.avatar} />
+            ) : (
+              <View style={styles.avatarDefault}>
+                <Text style={{ fontSize: 16 }}>👤</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Side Drawer */}
@@ -105,13 +124,23 @@ export default function AppHeader() {
               ))}
             </View>
 
-            <TouchableOpacity
-              style={[styles.drawerItem, styles.drawerLogout]}
-              onPress={() => { setShowDrawer(false); confirmLogout(); }}
-            >
-              <Text style={styles.drawerItemIcon}>🚪</Text>
-              <Text style={[styles.drawerItemLabel, { color: '#ef4444' }]}>Log Out</Text>
-            </TouchableOpacity>
+            {isGuest ? (
+              <TouchableOpacity
+                style={[styles.drawerItem, styles.drawerLogout]}
+                onPress={() => { setShowDrawer(false); router.push('/auth'); }}
+              >
+                <Text style={styles.drawerItemIcon}>🔑</Text>
+                <Text style={[styles.drawerItemLabel, { color: '#4a90d0' }]}>Sign In / Create Account</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={[styles.drawerItem, styles.drawerLogout]}
+                onPress={() => { setShowDrawer(false); confirmLogout(); }}
+              >
+                <Text style={styles.drawerItemIcon}>🚪</Text>
+                <Text style={[styles.drawerItemLabel, { color: '#ef4444' }]}>Log Out</Text>
+              </TouchableOpacity>
+            )}
 
             <Text style={styles.drawerTagline}>VTO · AI Fashion Studio</Text>
           </Pressable>
@@ -206,4 +235,9 @@ const styles = StyleSheet.create({
   menuItem: { paddingVertical: 16, paddingHorizontal: 20 },
   menuItemText: { color: '#ffffff', fontSize: 15, fontWeight: '600' },
   menuDivider: { height: 1, backgroundColor: '#27272a' },
+  signInBtn: {
+    paddingHorizontal: 14, paddingVertical: 7, borderRadius: 100,
+    backgroundColor: '#ffffff',
+  },
+  signInBtnText: { color: '#000000', fontSize: 13, fontWeight: '700' },
 });
