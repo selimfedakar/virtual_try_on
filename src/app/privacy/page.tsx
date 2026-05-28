@@ -6,7 +6,7 @@ export const metadata: Metadata = {
   description: 'Privacy Policy for the VTO Virtual Try-On app.',
 };
 
-const EFFECTIVE_DATE = 'May 2, 2026';
+const EFFECTIVE_DATE = 'May 27, 2026';
 const CONTACT_EMAIL = 'a.selimfedakar@gmail.com';
 
 export default function PrivacyPolicy() {
@@ -42,8 +42,23 @@ export default function PrivacyPolicy() {
         <p style={styles.p}>
           When you use the virtual try-on feature you upload a <strong>personal photo</strong> and
           a <strong>garment image</strong>. These images are transmitted to our AI processing
-          service to generate a try-on result. Generated images are stored in your account so you
-          can review and share them later.
+          service (Fashn.ai) to generate a try-on result. Generated images are stored in your
+          account so you can review and share them later.
+        </p>
+
+        <h3 style={styles.h3}>Face data</h3>
+        <p style={styles.p}>
+          VTO does <strong>not</strong> collect, log, or store any biometric face data, facial
+          recognition metadata, or facial geometry. The personal photo you upload is used solely
+          for <strong>visual image synthesis</strong> — specifically, to render how a garment looks
+          on your body using image-to-image diffusion techniques. No facial recognition, identity
+          matching, or biometric analysis of any kind is performed.
+        </p>
+        <p style={styles.p}>
+          Your uploaded photo is transmitted over HTTPS to Fashn.ai for AI processing and is{' '}
+          <strong>not retained beyond the processing session</strong>. It is not used to train
+          models, build profiles, or shared with any third party other than Fashn.ai as described
+          in Section 3.
         </p>
 
         <h3 style={styles.h3}>Usage data</h3>
@@ -72,12 +87,15 @@ export default function PrivacyPolicy() {
           </li>
           <li style={styles.li}>
             <strong>Fashn.ai</strong> (fashn.ai) — AI inference for the virtual try-on model.
-            Your uploaded person and garment images are sent to Fashn.ai for processing. Please
-            review{' '}
+            Your uploaded person photo and garment image are sent to Fashn.ai over an encrypted
+            HTTPS connection for processing. Fashn.ai processes these images solely to generate
+            the try-on result and does not retain them beyond the inference session. No biometric
+            or facial recognition data is collected or transmitted. Please review{' '}
             <a href="https://fashn.ai/privacy" style={styles.a} target="_blank" rel="noreferrer">
               Fashn.ai's Privacy Policy
             </a>{' '}
-            for details on how they handle inference data.
+            for full details. Before your images are sent, the app will request your explicit
+            consent.
           </li>
           <li style={styles.li}>
             <strong>Vercel</strong> (vercel.com) — web hosting for the VTO web application.
