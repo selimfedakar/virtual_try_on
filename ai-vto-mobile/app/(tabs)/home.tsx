@@ -7,13 +7,15 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
 import * as FileSystem from 'expo-file-system/legacy';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { useState, useRef, useEffect } from 'react';
 import React from 'react';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { supabase } from '../../src/lib/supabase';
 import AppHeader from '../../src/components/AppHeader';
 import PaywallModal from '../../src/components/PaywallModal';
+import AIConsentModal from '../../src/components/AIConsentModal';
 import {
   getSavedPhotos, savePhoto, deletePhoto, SavedPhoto,
 } from '../../src/lib/savedPhotos';
@@ -41,6 +43,7 @@ async function compressToBase64(uri: string): Promise<string> {
 }
 
 export default function Home() {
+  const router = useRouter();
   const [savedPhotos, setSavedPhotos] = useState<SavedPhoto[]>([]);
   const [selectedPhoto, setSelectedPhoto] = useState<SavedPhoto | null>(null);
   const [garmentUri, setGarmentUri] = useState<string | null>(null);
@@ -51,6 +54,7 @@ export default function Home() {
   const [showDeleteModal, setShowDeleteModal] = useState<SavedPhoto | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [showPaywall, setShowPaywall] = useState(false);
+  const [showAIConsent, setShowAIConsent] = useState(false);
 
   const scanAnim = useRef(new Animated.Value(0)).current;
   const glowAnim = useRef(new Animated.Value(0.4)).current;
@@ -164,9 +168,9 @@ export default function Home() {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
-        Alert.alert('Session expired', 'Please sign in again.');
         setIsGenerating(false);
         setLoadingStep('');
+        router.push('/auth');
         return;
       }
 
@@ -281,6 +285,22 @@ export default function Home() {
     }
   };
 
+  const handleGeneratePress = async () => {
+    // 1. Auth gate — guests must sign in to generate
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      router.push('/auth');
+      return;
+    }
+    // 2. AI consent gate — shown once, stored in AsyncStorage
+    const hasConsent = await AsyncStorage.getItem('vto_ai_consent_given');
+    if (!hasConsent) {
+      setShowAIConsent(true);
+      return;
+    }
+    handleGenerate();
+  };
+
   const handleSaveToLibrary = async () => {
     if (!resultImage) return;
     setIsSaving(true);
@@ -357,6 +377,16 @@ export default function Home() {
         visible={showPaywall}
         onClose={() => setShowPaywall(false)}
         onUpgraded={() => { setShowPaywall(false); Alert.alert('Welcome to Premium!', 'Unlimited generations activated. Enjoy!'); }}
+      />
+
+      <AIConsentModal
+        visible={showAIConsent}
+        onAgree={async () => {
+          await AsyncStorage.setItem('vto_ai_consent_given', '1');
+          setShowAIConsent(false);
+          handleGenerate();
+        }}
+        onCancel={() => setShowAIConsent(false)}
       />
 
       <ScrollView contentContainerStyle={{ paddingBottom: 110 }}>
@@ -466,7 +496,7 @@ export default function Home() {
         {/* Generate */}
         <TouchableOpacity
           style={[styles.primaryBtn, !canGenerate && { opacity: 0.35 }]}
-          onPress={handleGenerate}
+          onPress={handleGeneratePress}
           disabled={!canGenerate}
         >
           <Text style={styles.primaryBtnText}>🤖  Generate Try-On</Text>
