@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   Alert, StyleSheet, View, TextInput, TouchableOpacity,
-  Text, SafeAreaView, ActivityIndicator,
+  Text, SafeAreaView, ActivityIndicator, Image,
 } from 'react-native';
 import { supabase } from '../src/lib/supabase';
 import { StatusBar } from 'expo-status-bar';
@@ -44,7 +44,11 @@ export default function Auth() {
   async function signUpWithEmail() {
     if (!validate()) return;
     setLoading(true);
-    const { data: { session }, error } = await supabase.auth.signUp({ email: email.trim(), password });
+    const { data: { session }, error } = await supabase.auth.signUp({
+      email: email.trim(),
+      password,
+      options: { emailRedirectTo: 'aivtomobile://auth/callback' },
+    });
     if (error) {
       Alert.alert('Sign Up Failed', error.message);
     } else if (session) {
@@ -60,7 +64,9 @@ export default function Auth() {
       Alert.alert('Enter your email', 'Type your email address in the field above first.');
       return;
     }
-    const { error } = await supabase.auth.resetPasswordForEmail(email.trim());
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: 'aivtomobile://auth/callback',
+    });
     if (error) {
       Alert.alert('Error', error.message);
     } else {
@@ -77,10 +83,7 @@ export default function Auth() {
       <View style={styles.content}>
         {/* Logo area */}
         <View style={styles.logoArea}>
-          <View style={styles.logoBadge}>
-            <Text style={styles.logoBadgeText}>VTO</Text>
-          </View>
-          <Text style={styles.appName}>VTO</Text>
+          <Image source={require('../assets/icon.png')} style={styles.logoIcon} />
           <Text style={styles.appSubtitle}>Virtual Try On</Text>
           <Text style={styles.appTagline}>AI Fashion Studio</Text>
         </View>
@@ -152,6 +155,10 @@ export default function Auth() {
             </TouchableOpacity>
           )}
         </View>
+
+        <TouchableOpacity style={styles.guestBtn} onPress={() => router.replace('/(tabs)/home')}>
+          <Text style={styles.guestText}>Continue as Guest</Text>
+        </TouchableOpacity>
       </View>
 
     </SafeAreaView>
@@ -163,14 +170,8 @@ const styles = StyleSheet.create({
   content: { flex: 1, padding: 28, justifyContent: 'center' },
 
   logoArea: { alignItems: 'center', marginBottom: 44 },
-  logoBadge: {
-    width: 64, height: 64, borderRadius: 18,
-    backgroundColor: '#0a1b2e', borderWidth: 1.5, borderColor: '#1e4878',
-    alignItems: 'center', justifyContent: 'center', marginBottom: 14,
-  },
-  logoBadgeText: { color: '#4a90d0', fontSize: 18, fontWeight: '900', letterSpacing: 1 },
-  appName: { color: '#ffffff', fontSize: 26, fontWeight: '800', letterSpacing: 0.4 },
-  appSubtitle: { color: '#e879a0', fontSize: 11, fontWeight: '600', letterSpacing: 1.2, marginTop: 4, textAlign: 'center' },
+  logoIcon: { width: 88, height: 88, borderRadius: 20, marginBottom: 16 },
+  appSubtitle: { color: '#e879a0', fontSize: 11, fontWeight: '600', letterSpacing: 1.2, textAlign: 'center' },
   appTagline: { color: '#52525b', fontSize: 13, marginTop: 4, fontWeight: '500' },
 
   modeToggle: {
@@ -197,6 +198,9 @@ const styles = StyleSheet.create({
   primaryButtonText: { color: '#000000', fontSize: 16, fontWeight: 'bold' },
   forgotBtn: { alignItems: 'center', paddingVertical: 4 },
   forgotText: { color: '#52525b', fontSize: 14, fontWeight: '500' },
+
+  guestBtn: { alignItems: 'center', paddingTop: 10, paddingBottom: 2 },
+  guestText: { color: '#444', fontSize: 14, fontWeight: '500' },
 
   footerText: {
     color: '#2a2a2a', fontSize: 11, textAlign: 'center',
