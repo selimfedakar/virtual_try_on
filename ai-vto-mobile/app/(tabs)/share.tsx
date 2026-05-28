@@ -4,7 +4,7 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useState, useEffect } from 'react';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import React from 'react';
 import { supabase } from '../../src/lib/supabase';
 import AppHeader from '../../src/components/AppHeader';
@@ -26,9 +26,11 @@ const CAPTIONS = [
 const HASHTAGS = '#OOTD #VirtualTryOn #FashionTech #StyleInspo #OutfitCheck #AIFashion #FitCheck';
 
 export default function ShareScreen() {
+  const router = useRouter();
   const [tryOns, setTryOns] = useState<Generation[]>([]);
   const [loadingList, setLoadingList] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  const [isGuest, setIsGuest] = useState(false);
   const [selected, setSelected] = useState<Generation | null>(null);
   const [isSharing, setIsSharing] = useState(false);
   const [caption] = useState(() => CAPTIONS[Math.floor(Math.random() * CAPTIONS.length)]);
@@ -44,7 +46,9 @@ export default function ShareScreen() {
       if (event === 'SIGNED_OUT') {
         setTryOns([]);
         setSelected(null);
+        setIsGuest(true);
       } else if (event === 'SIGNED_IN') {
+        setIsGuest(false);
         loadTryOns();
       }
     });
@@ -56,6 +60,8 @@ export default function ShareScreen() {
     setLoadError(false);
     try {
       const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { setIsGuest(true); setLoadingList(false); return; }
+      setIsGuest(false);
       if (user) {
         const { data, error } = await supabase
           .from('generations')
@@ -115,7 +121,16 @@ export default function ShareScreen() {
         {/* ── Select Try-On ── */}
         <Text style={styles.label}>Select your AI Try-On to share</Text>
 
-        {loadingList ? (
+        {isGuest ? (
+          <View style={styles.emptyThumbRow}>
+            <Text style={[styles.emptyThumbText, { marginBottom: 12 }]}>
+              Sign in to share your AI try-ons with the world.
+            </Text>
+            <TouchableOpacity onPress={() => router.push('/auth')}>
+              <Text style={{ color: '#ffffff', fontSize: 14, fontWeight: '700', backgroundColor: '#27272a', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 100, overflow: 'hidden' }}>Sign In / Create Account</Text>
+            </TouchableOpacity>
+          </View>
+        ) : loadingList ? (
           <View style={styles.loadingRow}>
             <ActivityIndicator color="#ffffff" />
           </View>
