@@ -21,9 +21,6 @@ export default function Index() {
     );
   }
 
-  if (session) {
-    return <Redirect href="/(tabs)/home" />;
-  } else {
-    return <Redirect href="/auth" />;
-  }
+  // Signed-in users go to home; guests also go to home (auth is optional)
+  return <Redirect href="/(tabs)/home" />;
 }
