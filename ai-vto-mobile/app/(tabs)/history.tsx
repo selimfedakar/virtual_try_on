@@ -5,7 +5,7 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import { supabase } from '../../src/lib/supabase';
 import { useState, useEffect } from 'react';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import React from 'react';
 import AppHeader from '../../src/components/AppHeader';
 import { getSavedGarments, deleteGarment, SavedGarment } from '../../src/lib/savedGarments';
@@ -23,11 +23,13 @@ interface Generation {
 }
 
 export default function History() {
+  const router = useRouter();
   const [generations, setGenerations] = useState<Generation[]>([]);
   const [garments, setGarments] = useState<SavedGarment[]>([]);
   const [loading, setLoading] = useState(true);
   const [tryOnError, setTryOnError] = useState(false);
   const [selected, setSelected] = useState<Generation | null>(null);
+  const [isGuest, setIsGuest] = useState(false);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -40,7 +42,9 @@ export default function History() {
       if (event === 'SIGNED_OUT') {
         setGenerations([]);
         setGarments([]);
+        setIsGuest(true);
       } else if (event === 'SIGNED_IN') {
+        setIsGuest(false);
         fetchAll();
       }
     });
@@ -57,6 +61,8 @@ export default function History() {
     setTryOnError(false);
     try {
       const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { setIsGuest(true); return; }
+      setIsGuest(false);
       if (user) {
         const { data, error } = await supabase
           .from('generations')
@@ -125,7 +131,16 @@ export default function History() {
             <Text style={styles.sectionCount}>{generations.length}</Text>
           </View>
 
-          {tryOnError ? (
+          {isGuest ? (
+            <View style={styles.emptyBlock}>
+              <Text style={styles.emptyEmoji}>🔒</Text>
+              <Text style={styles.emptyTitle}>Sign in to see your try-ons</Text>
+              <Text style={styles.emptySub}>Create an account to save and view your generated looks.</Text>
+              <TouchableOpacity onPress={() => router.push('/auth')} style={{ marginTop: 14 }}>
+                <Text style={{ color: '#ffffff', fontSize: 14, fontWeight: '700', backgroundColor: '#27272a', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 100, overflow: 'hidden' }}>Sign In / Create Account</Text>
+              </TouchableOpacity>
+            </View>
+          ) : tryOnError ? (
             <View style={styles.emptyBlock}>
               <Text style={styles.emptyEmoji}>⚠️</Text>
               <Text style={styles.emptyTitle}>Failed to load</Text>
