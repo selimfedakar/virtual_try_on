@@ -12,18 +12,23 @@ export default function AIConsentModal({ visible, onAgree, onCancel }: Props) {
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
       <Pressable style={styles.overlay} onPress={onCancel}>
         <Pressable style={styles.dialog} onPress={e => e.stopPropagation()}>
-          <Text style={styles.title}>AI Processing Notice</Text>
+          <Text style={styles.title}>Data Processing Consent</Text>
           <Text style={styles.body}>
-            To generate your virtual try-on, your uploaded photo and garment image will be securely transmitted to our AI partner{' '}
-            <Text style={styles.highlight}>Fashn.ai</Text> over an encrypted HTTPS connection.{'\n\n'}
-            We do not collect biometric or facial recognition data. Your images are used solely to generate a visual try-on result and are not shared with any other third parties or used for advertising.
+            To generate your virtual try-on preview, your uploaded photo will be securely transmitted to our AI processing partner,{' '}
+            <Text style={styles.highlight}>Fashn.ai</Text>.{'\n\n'}
+            This data is exclusively used for clothing visualization and is not stored, sold, or shared for any other purpose. Processing will not begin unless you provide explicit consent.
           </Text>
+          <View style={styles.dataRow}>
+            <Text style={styles.dataItem}>📤  What is sent: Your uploaded photo</Text>
+            <Text style={styles.dataItem}>🤝  Sent to: Fashn.ai (AI processing partner)</Text>
+            <Text style={styles.dataItem}>🎯  Purpose: Virtual clothing visualization only</Text>
+          </View>
           <View style={styles.actions}>
             <TouchableOpacity style={styles.cancelBtn} onPress={onCancel}>
               <Text style={styles.cancelText}>Cancel</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.agreeBtn} onPress={onAgree}>
-              <Text style={styles.agreeText}>I Agree</Text>
+              <Text style={styles.agreeText}>I Consent</Text>
             </TouchableOpacity>
           </View>
         </Pressable>
@@ -35,15 +40,20 @@ export default function AIConsentModal({ visible, onAgree, onCancel }: Props) {
 const styles = StyleSheet.create({
   overlay: {
     flex: 1, backgroundColor: 'rgba(0,0,0,0.75)',
-    justifyContent: 'center', alignItems: 'center', paddingHorizontal: 28,
+    justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24,
   },
   dialog: {
     backgroundColor: '#18181b', borderRadius: 20, padding: 24,
     width: '100%', borderWidth: 1, borderColor: '#2a2a2a',
   },
-  title: { color: '#ffffff', fontSize: 18, fontWeight: 'bold', marginBottom: 14 },
-  body: { color: '#a1a1aa', fontSize: 14, lineHeight: 22, marginBottom: 24 },
+  title: { color: '#ffffff', fontSize: 17, fontWeight: 'bold', marginBottom: 12 },
+  body: { color: '#a1a1aa', fontSize: 14, lineHeight: 21, marginBottom: 16 },
   highlight: { color: '#4a90d0', fontWeight: '600' },
+  dataRow: {
+    backgroundColor: '#0f0f0f', borderRadius: 12, padding: 14, gap: 8, marginBottom: 20,
+    borderWidth: 1, borderColor: '#1e1e1e',
+  },
+  dataItem: { color: '#d4d4d8', fontSize: 13, lineHeight: 19 },
   actions: { flexDirection: 'row', gap: 12 },
   cancelBtn: {
     flex: 1, padding: 14, borderRadius: 100, alignItems: 'center',
