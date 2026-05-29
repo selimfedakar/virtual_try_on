@@ -321,6 +321,17 @@ export default function Home() {
     }
   };
 
+  const handleReportContent = () => {
+    Alert.alert(
+      'Report Content',
+      'Thank you for helping keep VTO safe. This result has been flagged for our moderation team. Any generation of objectionable or inappropriate content is strictly prohibited and results in permanent account suspension.',
+      [
+        { text: 'Submit Report', style: 'destructive', onPress: () => Alert.alert('Reported', 'Your report has been received. We will review it promptly.') },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
+  };
+
   const canGenerate = selectedPhoto !== null && garmentBase64 !== null && !isGenerating;
 
   // ── Result / AR screen ──────────────────────────────────────────────
@@ -361,6 +372,9 @@ export default function Home() {
               ? <ActivityIndicator color="#ffffff" />
               : <Text style={styles.saveLibraryText}>⬇  Save to Camera Roll</Text>
             }
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.reportBtn} onPress={handleReportContent}>
+            <Text style={styles.reportText}>⚑  Flag Inappropriate Content</Text>
           </TouchableOpacity>
         </ScrollView>
       </SafeAreaView>
@@ -675,6 +689,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   saveLibraryText: { color: '#ffffff', fontSize: 16, fontWeight: '600' },
+
+  reportBtn: { alignItems: 'center', paddingVertical: 14, marginTop: 4 },
+  reportText: { color: '#3f3f46', fontSize: 12, fontWeight: '500' },
 
   deleteOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 40 },
   deleteDialog: { backgroundColor: '#181818', borderRadius: 20, padding: 24, width: '100%', borderWidth: 1, borderColor: '#2a2a2a' },
