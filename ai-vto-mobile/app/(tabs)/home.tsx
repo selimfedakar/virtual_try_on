@@ -16,6 +16,7 @@ import { supabase } from '../../src/lib/supabase';
 import AppHeader from '../../src/components/AppHeader';
 import PaywallModal from '../../src/components/PaywallModal';
 import AIConsentModal from '../../src/components/AIConsentModal';
+import PhotoOwnershipModal from '../../src/components/PhotoOwnershipModal';
 import {
   getSavedPhotos, savePhoto, deletePhoto, SavedPhoto,
 } from '../../src/lib/savedPhotos';
@@ -55,6 +56,9 @@ export default function Home() {
   const [isSaving, setIsSaving] = useState(false);
   const [showPaywall, setShowPaywall] = useState(false);
   const [showAIConsent, setShowAIConsent] = useState(false);
+
+  const [showPhotoPolicy, setShowPhotoPolicy] = useState(false);
+  const pendingPhotoAction = useRef<(() => void) | null>(null);
 
   const scanAnim = useRef(new Animated.Value(0)).current;
   const glowAnim = useRef(new Animated.Value(0.4)).current;
@@ -98,6 +102,16 @@ export default function Home() {
     scan.start(); glow.start();
     return () => { scan.stop(); glow.stop(); };
   }, [resultImage]);
+
+  const requestPhotoWithPolicy = async (action: () => void) => {
+    const agreed = await AsyncStorage.getItem('vto_photo_policy_agreed');
+    if (agreed) {
+      action();
+    } else {
+      pendingPhotoAction.current = action;
+      setShowPhotoPolicy(true);
+    }
+  };
 
   const loadPhotos = async () => {
     const photos = await getSavedPhotos();
@@ -403,6 +417,20 @@ export default function Home() {
         onCancel={() => setShowAIConsent(false)}
       />
 
+      <PhotoOwnershipModal
+        visible={showPhotoPolicy}
+        onConfirm={async () => {
+          await AsyncStorage.setItem('vto_photo_policy_agreed', '1');
+          setShowPhotoPolicy(false);
+          pendingPhotoAction.current?.();
+          pendingPhotoAction.current = null;
+        }}
+        onCancel={() => {
+          setShowPhotoPolicy(false);
+          pendingPhotoAction.current = null;
+        }}
+      />
+
       <ScrollView contentContainerStyle={{ paddingBottom: 110 }}>
 
         {/* How it works guide */}
@@ -428,10 +456,10 @@ export default function Home() {
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>My Photos</Text>
           <View style={styles.addRow}>
-            <TouchableOpacity style={styles.addBtn} onPress={addFromCamera}>
+            <TouchableOpacity style={styles.addBtn} onPress={() => requestPhotoWithPolicy(addFromCamera)}>
               <Text style={styles.addBtnText}>📸 Camera</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.addBtn} onPress={addFromGallery}>
+            <TouchableOpacity style={styles.addBtn} onPress={() => requestPhotoWithPolicy(addFromGallery)}>
               <Text style={styles.addBtnText}>🖼️ Gallery</Text>
             </TouchableOpacity>
           </View>
@@ -443,10 +471,10 @@ export default function Home() {
             <Text style={styles.emptyPhotoTitle}>Add your first photo</Text>
             <Text style={styles.emptyPhotoSub}>Your saved photos appear here for quick reuse</Text>
             <View style={styles.emptyPhotoActions}>
-              <TouchableOpacity style={styles.addBtn} onPress={addFromCamera}>
+              <TouchableOpacity style={styles.addBtn} onPress={() => requestPhotoWithPolicy(addFromCamera)}>
                 <Text style={styles.addBtnText}>📸 Camera</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.addBtn} onPress={addFromGallery}>
+              <TouchableOpacity style={styles.addBtn} onPress={() => requestPhotoWithPolicy(addFromGallery)}>
                 <Text style={styles.addBtnText}>🖼️ Gallery</Text>
               </TouchableOpacity>
             </View>
@@ -469,7 +497,7 @@ export default function Home() {
                 </TouchableOpacity>
               );
             })}
-            <TouchableOpacity style={styles.addThumb} onPress={addFromGallery}>
+            <TouchableOpacity style={styles.addThumb} onPress={() => requestPhotoWithPolicy(addFromGallery)}>
               <Text style={styles.addThumbIcon}>＋</Text>
               <Text style={styles.addThumbLabel}>Add</Text>
             </TouchableOpacity>
@@ -501,8 +529,8 @@ export default function Home() {
           ) : (
             <TouchableOpacity style={styles.garmentPlaceholder} onPress={pickGarment}>
               <Text style={styles.garmentPlaceholderEmoji}>👕</Text>
-              <Text style={styles.garmentPlaceholderText}>Choose a garment from gallery</Text>
-              <Text style={styles.garmentPlaceholderSub}>Saved automatically to your closet</Text>
+              <Text style={styles.garmentPlaceholderText}>Choose a clothing item</Text>
+              <Text style={styles.garmentPlaceholderSub}>Upload a photo of a garment you want to try on</Text>
             </TouchableOpacity>
           )}
         </View>

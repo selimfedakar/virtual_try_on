@@ -161,7 +161,7 @@ export default function Auth() {
         </TouchableOpacity>
 
         <Text style={styles.tosText}>
-          By continuing, you agree that VTO may not be used to upload, generate, or distribute objectionable, inappropriate, or non-consensual content. Violations result in permanent account suspension.
+          By continuing, you agree to use VTO exclusively with photos of yourself. Uploading photos of other people without their consent, or generating inappropriate content, is strictly prohibited and results in permanent account suspension.
         </Text>
       </View>
 
@@ -207,8 +207,8 @@ const styles = StyleSheet.create({
   guestText: { color: '#444', fontSize: 14, fontWeight: '500' },
 
   tosText: {
-    color: '#2a2a2a', fontSize: 10, textAlign: 'center',
-    lineHeight: 15, marginTop: 16, paddingHorizontal: 8,
+    color: '#4a4a4a', fontSize: 11, textAlign: 'center',
+    lineHeight: 16, marginTop: 16, paddingHorizontal: 8,
   },
 
   footerText: {
