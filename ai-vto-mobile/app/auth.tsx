@@ -159,6 +159,10 @@ export default function Auth() {
         <TouchableOpacity style={styles.guestBtn} onPress={() => router.replace('/(tabs)/home')}>
           <Text style={styles.guestText}>Continue as Guest</Text>
         </TouchableOpacity>
+
+        <Text style={styles.tosText}>
+          By continuing, you agree that VTO may not be used to upload, generate, or distribute objectionable, inappropriate, or non-consensual content. Violations result in permanent account suspension.
+        </Text>
       </View>
 
     </SafeAreaView>
@@ -201,6 +205,11 @@ const styles = StyleSheet.create({
 
   guestBtn: { alignItems: 'center', paddingTop: 10, paddingBottom: 2 },
   guestText: { color: '#444', fontSize: 14, fontWeight: '500' },
+
+  tosText: {
+    color: '#2a2a2a', fontSize: 10, textAlign: 'center',
+    lineHeight: 15, marginTop: 16, paddingHorizontal: 8,
+  },
 
   footerText: {
     color: '#2a2a2a', fontSize: 11, textAlign: 'center',
