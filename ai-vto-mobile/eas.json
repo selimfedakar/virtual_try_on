@@ -15,6 +15,7 @@
       }
     },
     "production": {
+      "node": "20.19.4",
       "autoIncrement": true,
       "env": {
         "EXPO_PUBLIC_SUPABASE_URL": "https://zoxuqbuqqxracuxmwtim.supabase.co",
