@@ -13,6 +13,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'baseImage and garment required' }, { status: 400 });
     }
 
+    const ALLOWED_CATEGORIES = ['tops', 'bottoms', 'one-piece'] as const;
+    type GarmentCategory = typeof ALLOWED_CATEGORIES[number];
+    const rawCategory = body.garmentCategory as string | undefined;
+    const garmentCategory: GarmentCategory = ALLOWED_CATEGORIES.includes(rawCategory as GarmentCategory)
+      ? (rawCategory as GarmentCategory)
+      : 'tops';
+
     // Auth
     const token = req.headers.get('Authorization')?.replace('Bearer ', '');
     if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -49,7 +56,7 @@ export async function POST(req: Request) {
       inputs: {
         model_image: baseImage,
         garment_image: garments[0].image,
-        category: 'tops',
+        category: garmentCategory,
         garment_photo_type: 'auto',
       },
       webhook_url: webhookUrl,
