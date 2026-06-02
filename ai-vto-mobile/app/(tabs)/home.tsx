@@ -49,7 +49,6 @@ export default function Home() {
   const [selectedPhoto, setSelectedPhoto] = useState<SavedPhoto | null>(null);
   const [garmentUri, setGarmentUri] = useState<string | null>(null);
   const [garmentBase64, setGarmentBase64] = useState<string | null>(null);
-  const [garmentCategory, setGarmentCategory] = useState<'tops' | 'bottoms' | 'one-piece' | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [loadingStep, setLoadingStep] = useState('');
   const [resultImage, setResultImage] = useState<string | null>(null);
@@ -78,7 +77,6 @@ export default function Home() {
         setSelectedPhoto(null);
         setGarmentUri(null);
         setGarmentBase64(null);
-        setGarmentCategory(null);
         setResultImage(null);
       } else if (event === 'SIGNED_IN') {
         loadPhotos();
@@ -133,18 +131,6 @@ export default function Home() {
     }
   };
 
-  const addFromGallery = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [3, 4], quality: 0.8,
-    });
-    if (!result.canceled) {
-      const saved = await savePhoto(result.assets[0].uri);
-      setSavedPhotos(prev => [saved, ...prev]);
-      setSelectedPhoto(saved);
-      setResultImage(null);
-    }
-  };
-
   const handleDeletePhoto = async (photo: SavedPhoto) => {
     const updated = await deletePhoto(photo.id);
     setSavedPhotos(updated);
@@ -159,7 +145,6 @@ export default function Home() {
     if (!result.canceled) {
       const uri = result.assets[0].uri;
       setGarmentUri(uri);
-      setGarmentCategory(null);
       setResultImage(null);
       saveGarment(uri).catch(() => {});
       compressToBase64(uri).then(b64 => setGarmentBase64(b64)).catch(() => {});
@@ -211,7 +196,6 @@ export default function Home() {
           body: JSON.stringify({
             baseImage: `data:image/jpeg;base64,${personBase64}`,
             garments: [{ image: `data:image/jpeg;base64,${garmentCompressed}`, title: 'Mobile Upload' }],
-            garmentCategory: garmentCategory ?? 'tops',
           }),
         });
       } finally {
@@ -350,7 +334,7 @@ export default function Home() {
     );
   };
 
-  const canGenerate = selectedPhoto !== null && garmentBase64 !== null && garmentCategory !== null && !isGenerating;
+  const canGenerate = selectedPhoto !== null && garmentBase64 !== null && !isGenerating;
 
   // ── Result / AR screen ──────────────────────────────────────────────
   if (resultImage) {
@@ -458,13 +442,13 @@ export default function Home() {
 
         {/* My Photos */}
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>My Photos</Text>
+          <View>
+            <Text style={styles.sectionTitle}>My Photos</Text>
+            <Text style={styles.sectionSubtitle}>Selfie only — for your privacy</Text>
+          </View>
           <View style={styles.addRow}>
             <TouchableOpacity style={styles.addBtn} onPress={() => requestPhotoWithPolicy(addFromCamera)}>
               <Text style={styles.addBtnText}>📸 Camera</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.addBtn} onPress={() => requestPhotoWithPolicy(addFromGallery)}>
-              <Text style={styles.addBtnText}>🖼️ Gallery</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -477,9 +461,6 @@ export default function Home() {
             <View style={styles.emptyPhotoActions}>
               <TouchableOpacity style={styles.addBtn} onPress={() => requestPhotoWithPolicy(addFromCamera)}>
                 <Text style={styles.addBtnText}>📸 Camera</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.addBtn} onPress={() => requestPhotoWithPolicy(addFromGallery)}>
-                <Text style={styles.addBtnText}>🖼️ Gallery</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -501,7 +482,7 @@ export default function Home() {
                 </TouchableOpacity>
               );
             })}
-            <TouchableOpacity style={styles.addThumb} onPress={() => requestPhotoWithPolicy(addFromGallery)}>
+            <TouchableOpacity style={styles.addThumb} onPress={() => requestPhotoWithPolicy(addFromCamera)}>
               <Text style={styles.addThumbIcon}>＋</Text>
               <Text style={styles.addThumbLabel}>Add</Text>
             </TouchableOpacity>
@@ -516,7 +497,7 @@ export default function Home() {
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Garment</Text>
           {garmentUri && (
-            <TouchableOpacity onPress={() => { setGarmentUri(null); setGarmentBase64(null); setGarmentCategory(null); }}>
+            <TouchableOpacity onPress={() => { setGarmentUri(null); setGarmentBase64(null); }}>
               <Text style={styles.clearText}>Clear</Text>
             </TouchableOpacity>
           )}
@@ -539,30 +520,6 @@ export default function Home() {
           )}
         </View>
 
-        {garmentUri && (
-          <View style={styles.categorySection}>
-            <Text style={styles.categoryLabel}>Garment Type <Text style={styles.categoryRequired}>*required</Text></Text>
-            <View style={styles.categoryRow}>
-              {([
-                { value: 'tops', icon: '👕', label: 'Tops' },
-                { value: 'bottoms', icon: '👖', label: 'Bottoms' },
-                { value: 'one-piece', icon: '👗', label: 'Full-Body' },
-              ] as const).map(cat => (
-                <TouchableOpacity
-                  key={cat.value}
-                  style={[styles.categoryBtn, garmentCategory === cat.value && styles.categoryBtnSelected]}
-                  onPress={() => setGarmentCategory(cat.value)}
-                >
-                  <Text style={styles.categoryBtnIcon}>{cat.icon}</Text>
-                  <Text style={[styles.categoryBtnText, garmentCategory === cat.value && styles.categoryBtnTextSelected]}>
-                    {cat.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-        )}
-
         {/* Generate */}
         <TouchableOpacity
           style={[styles.primaryBtn, !canGenerate && { opacity: 0.35 }]}
@@ -574,8 +531,6 @@ export default function Home() {
 
         {!selectedPhoto && <Text style={styles.hintText}>Add or select a photo above to continue</Text>}
         {selectedPhoto && !garmentUri && <Text style={styles.hintText}>Choose a garment to continue</Text>}
-        {selectedPhoto && garmentUri && !garmentCategory && <Text style={styles.hintText}>Select garment type to continue</Text>}
-
         {isGenerating && (
           <View style={styles.loadingBox}>
             <ActivityIndicator size="large" color="#ffffff" />
@@ -642,6 +597,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16, marginTop: 20, marginBottom: 10,
   },
   sectionTitle: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  sectionSubtitle: { color: '#555', fontSize: 11, fontWeight: '400', marginTop: 2 },
   clearText: { color: '#555', fontSize: 13, fontWeight: '600' },
   addRow: { flexDirection: 'row', gap: 8 },
   addBtn: {
@@ -749,20 +705,6 @@ const styles = StyleSheet.create({
 
   reportBtn: { alignItems: 'center', paddingVertical: 14, marginTop: 4 },
   reportText: { color: '#3f3f46', fontSize: 12, fontWeight: '500' },
-
-  categorySection: { marginHorizontal: 16, marginTop: 14 },
-  categoryLabel: { color: '#aaa', fontSize: 12, fontWeight: '600', marginBottom: 10, letterSpacing: 0.5 },
-  categoryRequired: { color: '#ef4444', fontWeight: '500' },
-  categoryRow: { flexDirection: 'row', gap: 10 },
-  categoryBtn: {
-    flex: 1, paddingVertical: 12, borderRadius: 14,
-    alignItems: 'center', gap: 6,
-    backgroundColor: '#0f1f30', borderWidth: 1.5, borderColor: '#1e3a56',
-  },
-  categoryBtnSelected: { backgroundColor: '#0a2a4a', borderColor: '#4a90d0' },
-  categoryBtnIcon: { fontSize: 22 },
-  categoryBtnText: { color: '#6a9abf', fontSize: 11, fontWeight: '700', letterSpacing: 0.3 },
-  categoryBtnTextSelected: { color: '#7ab8e0' },
 
   deleteOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 40 },
   deleteDialog: { backgroundColor: '#181818', borderRadius: 20, padding: 24, width: '100%', borderWidth: 1, borderColor: '#2a2a2a' },
