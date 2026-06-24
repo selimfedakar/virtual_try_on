@@ -4,7 +4,8 @@ A mobile app that lets you see how any garment looks on you before buying it. Yo
 
 Built end-to-end as a final-year project: backend, mobile, AI pipeline, and App Store submission. No shortcuts.
 
-**Live:** https://virtual-try-on-three-sage.vercel.app
+**Live on the App Store:** https://apps.apple.com/us/app/vto-virtual-try-on/id6769989598
+**Web:** https://virtual-try-on-three-sage.vercel.app
 
 ---
 
