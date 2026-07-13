@@ -40,3 +40,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local mockup tooling (not part of the app)
+build_mockup.py
+export_mockups.py
+mockup_generator.html
+mockup_exports/
+vto_mockup/
+presentation_from_scratch.txt
+.env.local.save
