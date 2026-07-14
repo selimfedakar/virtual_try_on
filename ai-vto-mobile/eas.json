@@ -17,6 +17,9 @@
     "production": {
       "node": "20.19.4",
       "autoIncrement": true,
+      "ios": {
+        "image": "latest"
+      },
       "env": {
         "EXPO_PUBLIC_SUPABASE_URL": "https://zoxuqbuqqxracuxmwtim.supabase.co",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_F0LTaGAHTPcEOj7bBKLAGA_GBY7ggvP",
