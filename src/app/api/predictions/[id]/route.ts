@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { getAuthenticatedUser } from '@/lib/apiAuth';
 import { createServiceClient } from '@/lib/supabase/service';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 export const maxDuration = 30;
 
@@ -11,11 +12,8 @@ export async function GET(
   try {
     const { id } = await params;
 
-    const token = request.headers.get('Authorization')?.replace('Bearer ', '');
-    if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    const supabase = await createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-    if (authError || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const user = await getAuthenticatedUser(request);
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const res = await fetch(`https://api.fashn.ai/v1/status/${id}`, {
       headers: { 'Authorization': `Bearer ${process.env.FASHN_API_KEY}` },
@@ -46,7 +44,7 @@ export async function GET(
     // When Fashn.ai is done, guarantee the result is persisted before returning.
     // We atomically claim the pending_generations row (delete + returning).
     // - If we claim it: webhook hasn't processed this yet — we do it ourselves.
-    // - If it's already gone: webhook already ran — fetch the stored URL.
+    // - If it's already gone: webhook already ran — fetch the stored row by prediction_id.
     if (data.status === 'completed' && fashnImageUrl) {
       const serviceClient = createServiceClient();
 
@@ -55,20 +53,25 @@ export async function GET(
         .from('pending_generations')
         .delete()
         .eq('prediction_id', id)
-        .select('user_id')
+        .select('user_id, category')
         .single();
 
       if (claimed) {
         // We won the race — process and persist
         try {
-          const storageUrl = await uploadImageFromUrl(serviceClient, fashnImageUrl, claimed.user_id);
+          const { publicUrl, storagePath } = await uploadImageFromUrl(
+            serviceClient, fashnImageUrl, claimed.user_id,
+          );
 
           await serviceClient.from('generations').insert({
             user_id: claimed.user_id,
             base_image_url: 'saved_on_device',
             garment_image_url: 'data_uri_omitted',
             garment_title: 'Mobile Upload',
-            generated_image_url: storageUrl,
+            generated_image_url: publicUrl,
+            prediction_id: id,
+            storage_path: storagePath,
+            category: claimed.category ?? 'tops',
           });
 
           // Broadcast in case Realtime subscription is still alive
@@ -85,7 +88,7 @@ export async function GET(
                 messages: [{
                   topic: `realtime:generation:${claimed.user_id}`,
                   event: 'completed',
-                  payload: { predictionId: id, imageUrl: storageUrl },
+                  payload: { predictionId: id, imageUrl: publicUrl },
                 }],
               }),
             },
@@ -94,7 +97,7 @@ export async function GET(
           return NextResponse.json({
             success: true,
             status: 'succeeded',
-            data: { generatedImage: storageUrl },
+            data: { generatedImage: publicUrl },
           });
         } catch (err) {
           console.error('[Polling] Failed to process result:', err);
@@ -102,14 +105,13 @@ export async function GET(
         }
       } else {
         // Webhook already claimed and processed this prediction.
-        // Return the permanent Supabase Storage URL from the generations table.
+        // Look up the exact row by prediction_id (fixes the wrong-result race
+        // where two concurrent generations could return each other's image).
         const { data: gen } = await serviceClient
           .from('generations')
           .select('generated_image_url')
+          .eq('prediction_id', id)
           .eq('user_id', user.id)
-          .gte('created_at', new Date(Date.now() - 15 * 60 * 1000).toISOString())
-          .order('created_at', { ascending: false })
-          .limit(1)
           .single();
 
         if (gen?.generated_image_url) {
@@ -136,19 +138,23 @@ export async function GET(
   }
 }
 
-async function uploadImageFromUrl(supabase: any, imageUrl: string, userId: string): Promise<string> {
+async function uploadImageFromUrl(
+  supabase: SupabaseClient,
+  imageUrl: string,
+  userId: string,
+): Promise<{ publicUrl: string; storagePath: string }> {
   const response = await fetch(imageUrl);
   if (!response.ok) throw new Error('Failed to download generated image');
 
   const buffer = await response.arrayBuffer();
-  const path = `${userId}/${Date.now()}.jpg`;
+  const storagePath = `${userId}/${Date.now()}.jpg`;
 
   const { error } = await supabase.storage
     .from('try-ons')
-    .upload(path, new Uint8Array(buffer), { contentType: 'image/jpeg' });
+    .upload(storagePath, new Uint8Array(buffer), { contentType: 'image/jpeg' });
 
   if (error) throw new Error(`Storage upload failed: ${error.message}`);
 
-  const { data } = supabase.storage.from('try-ons').getPublicUrl(path);
-  return data.publicUrl;
+  const { data } = supabase.storage.from('try-ons').getPublicUrl(storagePath);
+  return { publicUrl: data.publicUrl, storagePath };
 }
