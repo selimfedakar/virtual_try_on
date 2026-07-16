@@ -1,186 +1,268 @@
-"use client";
+import Link from "next/link";
+import AppStoreBadge from "@/components/AppStoreBadge";
+import SiteFooter from "@/components/SiteFooter";
 
-import { useState, useEffect } from "react";
-import HeroSection from "@/components/HeroSection";
-import UploadSection from "@/components/UploadSection";
-import GarmentInput from "@/components/GarmentInput";
-import ResultsView from "@/components/ResultsView";
-import AuthModal from "@/components/AuthModal";
-import HistoryView from "@/components/HistoryView";
-import { createClient } from "@/lib/supabase/client";
-import { extractClothesMask } from "@/lib/mediapipe";
+const APP_STORE_URL =
+  "https://apps.apple.com/us/app/vto-virtual-try-on/id6769989598";
 
-export type Garment = {
-  url: string;
-  title: string;
-  image: string | null;
-  price: string;
-};
+const steps = [
+  {
+    number: "1",
+    title: "Take a selfie",
+    description:
+      "Snap a full-body photo or pick one from your library. Good lighting and a simple background work best.",
+  },
+  {
+    number: "2",
+    title: "Add a clothing item",
+    description:
+      "Photograph a garment, screenshot it while shopping, or pick a piece from your digital closet.",
+  },
+  {
+    number: "3",
+    title: "AI generates a preview",
+    description:
+      "Our AI service renders the garment onto your photo in seconds — realistic drape, fit, and lighting.",
+  },
+  {
+    number: "4",
+    title: "Style the result",
+    description:
+      "Save the look, compare outfits, get stylist suggestions, and build your favorite combinations.",
+  },
+];
+
+const features = [
+  {
+    title: "AI Try-On",
+    description:
+      "See how any garment looks on you before you buy. Photorealistic previews generated from a single selfie and a garment photo.",
+    icon: (
+      <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 3l1.7 3.6L17.5 8l-3.8 1.4L12 13l-1.7-3.6L6.5 8l3.8-1.4z" />
+        <path d="M18.5 14l.9 1.9 1.9.7-1.9.7-.9 1.9-.9-1.9-1.9-.7 1.9-.7z" />
+        <path d="M6 15l.8 1.7 1.7.6-1.7.6L6 19.6l-.8-1.7-1.7-.6 1.7-.6z" />
+      </svg>
+    ),
+  },
+  {
+    title: "AI Stylist",
+    description:
+      "Chat with a personal stylist that knows your closet. Get outfit ideas, color pairings, and advice for any occasion.",
+    icon: (
+      <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M21 12c0 3.9-4 7-9 7-1 0-2-.1-2.9-.4L4 20l1.2-3.2C3.8 15.5 3 13.8 3 12c0-3.9 4-7 9-7s9 3.1 9 7z" />
+        <path d="M8.5 12h.01M12 12h.01M15.5 12h.01" />
+      </svg>
+    ),
+  },
+  {
+    title: "Fit Analysis",
+    description:
+      "Add your height and measurements to get size recommendations and see how a piece is likely to fit your body.",
+    icon: (
+      <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 5h16v4H4z" />
+        <path d="M7 5v2M11 5v3M15 5v2M19 5v3" />
+        <path d="M6 15h12M6 19h8" />
+      </svg>
+    ),
+  },
+  {
+    title: "Digital Closet",
+    description:
+      "Keep every garment and generated look in one place. Organize your wardrobe and revisit past try-ons anytime.",
+    icon: (
+      <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="4" width="18" height="16" rx="2" />
+        <path d="M12 4v16M3 12h18" />
+      </svg>
+    ),
+  },
+];
 
 export default function Home() {
-  const [baseImage, setBaseImage] = useState<string | null>(null);
-  const [garments, setGarments] = useState<Garment[]>([]);
-  const [generatedImage, setGeneratedImage] = useState<string | null>(null);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [clothesMask, setClothesMask] = useState<string | null>(null);
-  
-  // Auth state
-  const [user, setUser] = useState<any>(null);
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-
-  useEffect(() => {
-    // Check active sessions and sets the user
-    const checkUser = async () => {
-      const supabase = createClient();
-      const { data: { session } } = await supabase.auth.getSession();
-      setUser(session?.user ?? null);
-      
-      // Listen for changes on auth state (sign in, sign out, etc.)
-      const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-        setUser(session?.user ?? null);
-      });
-      return () => subscription.unsubscribe();
-    };
-    checkUser();
-  }, []);
-
-  const handleLogout = async () => {
-    const supabase = createClient();
-    await supabase.auth.signOut();
-  };
-
-  const handleUploadBaseImage = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        const imageUri = reader.result as string;
-        setBaseImage(imageUri);
-        
-        // Extract the user's clothes mask silently in the background
-        const mask = await extractClothesMask(imageUri);
-        setClothesMask(mask);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const handleGenerate = async () => {
-    if (!baseImage || garments.length === 0) return;
-
-    if (!user) {
-      setIsAuthModalOpen(true);
-      return;
-    }
-
-    if (!clothesMask) {
-      alert("Still processing your image (extracting clothes mask). Please wait a few seconds and try again.");
-      return;
-    }
-
-    setIsGenerating(true);
-    setGeneratedImage(null);
-
-    try {
-      // 1. Kick off the generation with IDM-VTON payload
-      const response = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-            baseImage, 
-            garments,
-            clothesMask
-        })
-      });
-
-      const data = await response.json();
-
-      if (!data.success || !data.data.predictionId) {
-        throw new Error(data.error || "Failed to start generation");
-      }
-
-      const predictionId = data.data.predictionId;
-      
-      // 2. Poll for the result
-      const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-      
-      while (true) {
-        await sleep(3000); // Wait 3 seconds
-        
-        const statusRes = await fetch(`/api/predictions/${predictionId}`);
-        const statusData = await statusRes.json();
-        
-        if (!statusData.success) {
-            throw new Error(statusData.error || "Failed to check status");
-        }
-        
-        if (statusData.status === "succeeded") {
-            const finalImage = statusData.data.generatedImage;
-            
-            setGeneratedImage(finalImage);
-            
-            // 3. Save successful generation to Supabase database directly from client
-            const supabase = createClient();
-            await supabase.from('generations').insert({
-                user_id: user.id,
-                base_image_url: baseImage.length > 500 ? "data_uri_omitted" : baseImage, 
-                garment_image_url: (garments[0].image && garments[0].image.length > 500) ? "data_uri_omitted" : garments[0].image, 
-                garment_title: garments[0].title,
-                generated_image_url: finalImage
-            });
-            break;
-            
-        } else if (statusData.status === "failed" || statusData.status === "canceled") {
-            throw new Error(`Generation ${statusData.status}: ${statusData.error || 'Unknown error'}`);
-        }
-        
-        // If status is "starting" or "processing", the loop continues
-      }
-
-    } catch (err: any) {
-      console.error(err);
-      alert("An error occurred: " + err.message);
-    } finally {
-      setIsGenerating(false);
-    }
-  };
-
   return (
-    <div className="min-h-screen bg-background text-foreground font-sans selection:bg-zinc-200">
-      <main className="mx-auto flex flex-col items-center justify-start w-full transition-all">
-        {user ? (
-          <div className="absolute top-4 right-4 z-10 flex items-center gap-4">
-            <span className="text-sm text-zinc-500">{user.email}</span>
-            <button onClick={handleLogout} className="text-sm font-medium text-zinc-900 hover:text-zinc-600 transition-colors">Log out</button>
-          </div>
-        ) : (
-          <div className="absolute top-4 right-4 z-10">
-            <button onClick={() => setIsAuthModalOpen(true)} className="px-4 py-2 bg-zinc-900 text-white rounded-full text-sm font-medium hover:bg-zinc-800 transition-all shadow-sm">Log in</button>
-          </div>
-        )}
-        <AuthModal 
-          isOpen={isAuthModalOpen} 
-          onClose={() => setIsAuthModalOpen(false)} 
-          onSuccess={() => setIsAuthModalOpen(false)} 
-        />
-        <HeroSection />
-
-        <div className="w-full px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto flex flex-col items-center">
-          <UploadSection baseImage={baseImage} onUpload={handleUploadBaseImage} />
-          <GarmentInput garments={garments} setGarments={setGarments} />
+    <div className="flex min-h-screen flex-col bg-black text-foreground">
+      {/* Header */}
+      <header className="border-b border-card-border/40">
+        <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-5">
+          <Link href="/" className="text-lg font-bold tracking-tight text-white">
+            VTO
+            <span className="ml-2 text-sm font-normal text-accent-soft">
+              Virtual Try-On
+            </span>
+          </Link>
+          <nav aria-label="Main" className="flex items-center gap-6 text-sm">
+            <Link href="/support" className="text-muted transition-colors hover:text-white">
+              Support
+            </Link>
+            <a
+              href={APP_STORE_URL}
+              className="rounded-full bg-white px-4 py-1.5 font-medium text-black transition-colors hover:bg-zinc-200"
+            >
+              Get the app
+            </a>
+          </nav>
         </div>
+      </header>
 
-        <div className="w-full bg-zinc-50 border-t border-zinc-100 mt-12 py-20 px-4 sm:px-6 lg:px-8 flex flex-col items-center">
-          <ResultsView
-            garments={garments}
-            generatedImage={generatedImage}
-            isGenerating={isGenerating}
-            onGenerate={handleGenerate}
-            canGenerate={!!baseImage && garments.length > 0}
+      <main className="flex-1">
+        {/* Hero */}
+        <section
+          aria-labelledby="hero-heading"
+          className="relative overflow-hidden"
+        >
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-x-0 top-0 h-[480px] bg-[radial-gradient(ellipse_at_top,rgba(74,144,208,0.18),transparent_65%)]"
           />
-          {user && <HistoryView />}
-        </div>
+          <div className="relative mx-auto flex max-w-3xl flex-col items-center px-6 pb-20 pt-24 text-center sm:pt-32">
+            <p className="mb-4 rounded-full border border-card-border bg-card px-4 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-accent">
+              Now on the App Store
+            </p>
+            <h1
+              id="hero-heading"
+              className="text-4xl font-extrabold tracking-tight text-white sm:text-6xl"
+            >
+              Try it on before
+              <br />
+              you buy it.
+            </h1>
+            <p className="mt-6 max-w-xl text-base leading-relaxed text-muted sm:text-lg">
+              VTO uses AI to show you how any piece of clothing looks on you —
+              from a single selfie. Preview outfits, get styling advice, and
+              build your digital closet, all on your iPhone.
+            </p>
+            <div className="mt-10">
+              <AppStoreBadge />
+            </div>
+            <p className="mt-6 text-xs text-muted">
+              Free to use with 5 try-ons per day. Photos are processed securely
+              by our AI service and never sold or used for advertising.
+            </p>
+          </div>
+        </section>
+
+        {/* How it works */}
+        <section
+          aria-labelledby="how-heading"
+          className="mx-auto max-w-5xl px-6 py-20"
+        >
+          <h2
+            id="how-heading"
+            className="text-center text-3xl font-bold tracking-tight text-white"
+          >
+            How it works
+          </h2>
+          <p className="mx-auto mt-3 max-w-md text-center text-sm text-muted">
+            From selfie to styled look in four steps.
+          </p>
+          <ol className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+            {steps.map((step) => (
+              <li
+                key={step.number}
+                className="rounded-2xl border border-card-border bg-card p-6"
+              >
+                <span
+                  aria-hidden="true"
+                  className="mb-4 flex h-9 w-9 items-center justify-center rounded-full bg-accent/15 text-sm font-bold text-accent"
+                >
+                  {step.number}
+                </span>
+                <h3 className="text-base font-semibold text-white">
+                  {step.title}
+                </h3>
+                <p className="mt-2 text-sm leading-relaxed text-accent-soft/80">
+                  {step.description}
+                </p>
+              </li>
+            ))}
+          </ol>
+        </section>
+
+        {/* Features */}
+        <section
+          aria-labelledby="features-heading"
+          className="border-y border-card-border/40 bg-[#050b12]"
+        >
+          <div className="mx-auto max-w-5xl px-6 py-20">
+            <h2
+              id="features-heading"
+              className="text-center text-3xl font-bold tracking-tight text-white"
+            >
+              Everything your wardrobe needs
+            </h2>
+            <div className="mt-12 grid gap-6 sm:grid-cols-2">
+              {features.map((feature) => (
+                <article
+                  key={feature.title}
+                  className="rounded-2xl border border-card-border bg-card p-7"
+                >
+                  <div className="mb-4 inline-flex rounded-xl bg-accent/15 p-3 text-accent">
+                    {feature.icon}
+                  </div>
+                  <h3 className="text-lg font-semibold text-white">
+                    {feature.title}
+                  </h3>
+                  <p className="mt-2 text-sm leading-relaxed text-muted">
+                    {feature.description}
+                  </p>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* Honest privacy note */}
+        <section
+          aria-labelledby="privacy-heading"
+          className="mx-auto max-w-3xl px-6 py-20 text-center"
+        >
+          <h2
+            id="privacy-heading"
+            className="text-2xl font-bold tracking-tight text-white"
+          >
+            Honest about your photos
+          </h2>
+          <p className="mt-4 text-sm leading-relaxed text-muted">
+            To generate a try-on, your photo and the garment image are sent
+            over an encrypted connection to our AI processing partner and used
+            only to render the result — no facial recognition, no biometric
+            analysis, no ad profiling. Generated images are stored in your
+            account until you delete them, and you can delete your account and
+            all data at any time from inside the app.
+          </p>
+          <p className="mt-6">
+            <Link
+              href="/privacy"
+              className="text-sm font-medium text-accent underline-offset-4 hover:underline"
+            >
+              Read the full Privacy Policy
+            </Link>
+          </p>
+        </section>
+
+        {/* Final CTA */}
+        <section
+          aria-labelledby="cta-heading"
+          className="border-t border-card-border/40"
+        >
+          <div className="mx-auto flex max-w-3xl flex-col items-center px-6 py-20 text-center">
+            <h2
+              id="cta-heading"
+              className="text-3xl font-bold tracking-tight text-white"
+            >
+              Your next outfit is one selfie away.
+            </h2>
+            <div className="mt-8">
+              <AppStoreBadge />
+            </div>
+          </div>
+        </section>
       </main>
+
+      <SiteFooter />
     </div>
   );
 }
