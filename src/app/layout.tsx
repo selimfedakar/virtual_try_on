@@ -13,8 +13,27 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "VTO — Virtual Try-On",
-  description: "AI-powered virtual try-on. See how clothes look on you before you buy.",
+  metadataBase: new URL("https://virtual-try-on-three-sage.vercel.app"),
+  title: {
+    default: "VTO — Virtual Try-On",
+    template: "%s — VTO Virtual Try-On",
+  },
+  description:
+    "See how clothes look on you before you buy. VTO is an AI-powered virtual try-on app for iPhone with an AI stylist, fit analysis, and a digital closet.",
+  openGraph: {
+    title: "VTO — Virtual Try-On",
+    description:
+      "See how clothes look on you before you buy. AI-powered virtual try-on for iPhone.",
+    url: "https://virtual-try-on-three-sage.vercel.app",
+    siteName: "VTO — Virtual Try-On",
+    type: "website",
+  },
+  twitter: {
+    card: "summary",
+    title: "VTO — Virtual Try-On",
+    description:
+      "See how clothes look on you before you buy. AI-powered virtual try-on for iPhone.",
+  },
 };
 
 export default function RootLayout({
