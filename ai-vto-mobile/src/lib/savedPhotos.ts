@@ -1,24 +1,25 @@
-import * as FileSystem from 'expo-file-system/legacy';
+import { Directory, File, Paths } from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getScopedKey } from './userScope';
 
-const STORAGE_KEY = 'vto_saved_person_photos';
-const PHOTOS_DIR = `${FileSystem.documentDirectory}person_photos/`;
+const BASE_STORAGE_KEY = 'vto_saved_person_photos';
+const PHOTOS_DIR = new Directory(Paths.document, 'person_photos');
 
 export interface SavedPhoto {
   id: string;
   uri: string; // permanent file:// path on device
 }
 
-async function ensureDir(): Promise<void> {
-  const info = await FileSystem.getInfoAsync(PHOTOS_DIR);
-  if (!info.exists) {
-    await FileSystem.makeDirectoryAsync(PHOTOS_DIR, { intermediates: true });
+function ensureDir(): void {
+  if (!PHOTOS_DIR.exists) {
+    PHOTOS_DIR.create({ intermediates: true, idempotent: true });
   }
 }
 
 export async function getSavedPhotos(): Promise<SavedPhoto[]> {
   try {
-    const stored = await AsyncStorage.getItem(STORAGE_KEY);
+    const key = await getScopedKey(BASE_STORAGE_KEY);
+    const stored = await AsyncStorage.getItem(key);
     return stored ? JSON.parse(stored) : [];
   } catch {
     return [];
@@ -26,15 +27,16 @@ export async function getSavedPhotos(): Promise<SavedPhoto[]> {
 }
 
 export async function savePhoto(sourceUri: string): Promise<SavedPhoto> {
-  await ensureDir();
+  ensureDir();
   const id = Date.now().toString();
-  const destUri = `${PHOTOS_DIR}${id}.jpg`;
-  await FileSystem.copyAsync({ from: sourceUri, to: destUri });
+  const dest = new File(PHOTOS_DIR, `${id}.jpg`);
+  new File(sourceUri).copy(dest);
 
   const photos = await getSavedPhotos();
-  const newPhoto: SavedPhoto = { id, uri: destUri };
+  const newPhoto: SavedPhoto = { id, uri: dest.uri };
   const updated = [newPhoto, ...photos].slice(0, 6); // max 6 saved
-  await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+  const key = await getScopedKey(BASE_STORAGE_KEY);
+  await AsyncStorage.setItem(key, JSON.stringify(updated));
   return newPhoto;
 }
 
@@ -42,19 +44,24 @@ export async function deletePhoto(id: string): Promise<SavedPhoto[]> {
   const photos = await getSavedPhotos();
   const target = photos.find(p => p.id === id);
   if (target) {
-    await FileSystem.deleteAsync(target.uri, { idempotent: true });
+    try {
+      const file = new File(target.uri);
+      if (file.exists) file.delete();
+    } catch {}
   }
   const updated = photos.filter(p => p.id !== id);
-  await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+  const key = await getScopedKey(BASE_STORAGE_KEY);
+  await AsyncStorage.setItem(key, JSON.stringify(updated));
   return updated;
 }
 
 export async function clearSavedPhotos(): Promise<void> {
-  await AsyncStorage.removeItem(STORAGE_KEY).catch(() => {});
+  try {
+    const key = await getScopedKey(BASE_STORAGE_KEY);
+    await AsyncStorage.removeItem(key);
+  } catch {}
 }
 
 export async function readPhotoAsBase64(uri: string): Promise<string> {
-  return FileSystem.readAsStringAsync(uri, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
+  return new File(uri).base64();
 }
