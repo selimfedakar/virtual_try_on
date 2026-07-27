@@ -1,12 +1,14 @@
+import { fetch as expoFetch } from 'expo/fetch';
+import { File, Paths } from 'expo-file-system';
 import { supabase } from './supabase';
-import * as FileSystem from 'expo-file-system/legacy';
 
 const TRY_ONS_BUCKET = 'try-ons';
 const AVATARS_BUCKET = 'avatars';
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL!;
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
 
-// Native-level binary upload — avoids the fetch().blob() empty-blob bug on React Native
+// Binary upload via expo/fetch with the file's raw bytes as body —
+// avoids the fetch().blob() empty-blob bug on React Native.
 async function nativeUpload(
   localUri: string,
   bucket: string,
@@ -16,18 +18,19 @@ async function nativeUpload(
   const { data: { session } } = await supabase.auth.getSession();
   const token = session?.access_token ?? SUPABASE_ANON_KEY;
 
-  const res = await FileSystem.uploadAsync(
+  const bytes = await new File(localUri).arrayBuffer();
+
+  const res = await expoFetch(
     `${SUPABASE_URL}/storage/v1/object/${bucket}/${path}`,
-    localUri,
     {
-      httpMethod: 'POST',
-      uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+      method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
         apikey: SUPABASE_ANON_KEY,
         'Content-Type': 'image/jpeg',
         'x-upsert': upsert ? 'true' : 'false',
       },
+      body: new Uint8Array(bytes),
     },
   );
 
@@ -41,12 +44,12 @@ async function nativeUpload(
 
 export async function uploadTryOnImage(imageUrl: string, userId: string): Promise<string> {
   const path = `${userId}/${Date.now()}.jpg`;
-  const tmpPath = `${FileSystem.cacheDirectory}vto_tmp.jpg`;
 
-  // Download Replicate CDN URL to local file first — reliable on all Expo versions
-  await FileSystem.downloadAsync(imageUrl, tmpPath);
+  // Download the CDN URL to a local file first — reliable on all Expo versions
+  const tmpFile = new File(Paths.cache, 'vto_tmp.jpg');
+  await File.downloadFileAsync(imageUrl, tmpFile, { idempotent: true });
 
-  return await nativeUpload(tmpPath, TRY_ONS_BUCKET, path, false);
+  return await nativeUpload(tmpFile.uri, TRY_ONS_BUCKET, path, false);
 }
 
 export async function uploadProfilePhoto(localUri: string, userId: string): Promise<string> {
