@@ -1,6 +1,6 @@
 import {
   StyleSheet, Text, View, SafeAreaView, TouchableOpacity,
-  Image, ScrollView, TextInput, Alert, ActivityIndicator,
+  Image, ScrollView, TextInput, Alert, ActivityIndicator, Linking,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
@@ -11,6 +11,8 @@ import { useProfile } from '../../src/context/ProfileContext';
 import { uploadProfilePhoto } from '../../src/lib/storage';
 import { clearSavedPhotos } from '../../src/lib/savedPhotos';
 import { clearSavedGarments } from '../../src/lib/savedGarments';
+import { getIsPremium } from '../../src/lib/premium';
+import PaywallModal from '../../src/components/PaywallModal';
 
 function isValidHeight(v: string) {
   const n = parseFloat(v);
@@ -33,11 +35,14 @@ export default function Profile() {
   const [saving, setSaving] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
+  const [isPremium, setIsPremium] = useState<boolean | null>(null);
+  const [showPaywall, setShowPaywall] = useState(false);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (user?.email) setEmail(user.email);
     });
+    getIsPremium().then(setIsPremium);
   }, []);
 
   useEffect(() => {
@@ -50,11 +55,18 @@ export default function Profile() {
   const pickProfilePhoto = async () => {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) {
-      Alert.alert('Permission needed', 'Photo library access is required.');
+      Alert.alert(
+        'Permission needed',
+        'Photo library access is required to pick a profile photo.',
+        [
+          { text: 'Open Settings', onPress: () => Linking.openSettings() },
+          { text: 'Cancel', style: 'cancel' },
+        ],
+      );
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.85,
@@ -200,6 +212,35 @@ export default function Profile() {
           </View>
         </View>
 
+        {/* Subscription */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Subscription</Text>
+          <View style={styles.subRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.subStatus}>
+                {isPremium === null ? 'Checking…' : isPremium ? 'Premium ✨' : 'Free plan'}
+              </Text>
+              <Text style={styles.subNote}>
+                {isPremium
+                  ? 'Unlimited generations and high-quality mode are active.'
+                  : '5 free generations per day. Upgrade for unlimited access.'}
+              </Text>
+            </View>
+            {isPremium ? (
+              <TouchableOpacity
+                style={styles.subBtn}
+                onPress={() => Linking.openURL('https://apps.apple.com/account/subscriptions')}
+              >
+                <Text style={styles.subBtnText}>Manage</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity style={styles.subBtnPrimary} onPress={() => setShowPaywall(true)}>
+                <Text style={styles.subBtnPrimaryText}>Upgrade</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+
         {/* Body Measurements */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Body Measurements</Text>
@@ -276,6 +317,16 @@ export default function Profile() {
           </Text>
         </View>
       </ScrollView>
+
+      <PaywallModal
+        visible={showPaywall}
+        onClose={() => setShowPaywall(false)}
+        onUpgraded={() => {
+          setShowPaywall(false);
+          setIsPremium(true);
+          Alert.alert('Welcome to Premium!', 'Unlimited generations activated. Enjoy!');
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -334,6 +385,20 @@ const styles = StyleSheet.create({
   toggleActive: { backgroundColor: '#ffffff' },
   toggleTextOn: { color: '#000000', fontSize: 14, fontWeight: '600' },
   toggleTextOff: { color: '#a1a1aa', fontSize: 14, fontWeight: '600' },
+
+  subRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 8 },
+  subStatus: { color: '#ffffff', fontSize: 16, fontWeight: '700' },
+  subNote: { color: '#52525b', fontSize: 12, marginTop: 4, lineHeight: 17 },
+  subBtn: {
+    borderWidth: 1, borderColor: '#3f3f46', borderRadius: 100,
+    paddingHorizontal: 16, paddingVertical: 10,
+  },
+  subBtnText: { color: '#ffffff', fontSize: 13, fontWeight: '600' },
+  subBtnPrimary: {
+    backgroundColor: '#ffffff', borderRadius: 100,
+    paddingHorizontal: 16, paddingVertical: 10,
+  },
+  subBtnPrimaryText: { color: '#000000', fontSize: 13, fontWeight: 'bold' },
 
   saveButton: {
     backgroundColor: '#ffffff', padding: 18, borderRadius: 100,
