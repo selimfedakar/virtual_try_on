@@ -10,6 +10,10 @@ export interface ProfileData {
   height: string;
   weight: string;
   gender: string;
+  // Optional body measurements (cm) for Fit Analysis 2.0 — stored locally only.
+  chest: string;
+  waist: string;
+  hips: string;
 }
 
 interface ProfileContextType {
@@ -24,6 +28,9 @@ const defaultProfile: ProfileData = {
   height: '',
   weight: '',
   gender: 'Male',
+  chest: '',
+  waist: '',
+  hips: '',
 };
 
 const ProfileContext = createContext<ProfileContextType>({
@@ -55,9 +62,13 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
 
   const loadProfile = async () => {
     // Load local cache first so UI is immediate
+    let cachedProfile: Partial<ProfileData> = {};
     try {
       const cached = await AsyncStorage.getItem('antigravity_profile');
-      if (cached) setProfile(JSON.parse(cached));
+      if (cached) {
+        cachedProfile = JSON.parse(cached);
+        setProfile({ ...defaultProfile, ...cachedProfile });
+      }
     } catch {}
 
     // Then sync from Supabase (overwrites local with server truth)
@@ -79,6 +90,10 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
         height: data.height ?? '',
         weight: data.weight ?? '',
         gender: data.gender ?? 'Male',
+        // Measurements are local-only (no server columns) — keep cached values.
+        chest: cachedProfile.chest ?? '',
+        waist: cachedProfile.waist ?? '',
+        hips: cachedProfile.hips ?? '',
       };
       setProfile(merged);
       await AsyncStorage.setItem('antigravity_profile', JSON.stringify(merged)).catch(() => {});
