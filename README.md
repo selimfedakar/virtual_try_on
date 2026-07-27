@@ -4,17 +4,18 @@
 
 ### See how any garment looks on you before you buy it.
 
-*Upload a photo of yourself and a photo of the clothing — an AI diffusion model composites them into a photorealistic result in seconds.*
+*Snap a selfie and pick a clothing item — an AI try-on model composites them into a photorealistic result in seconds, and an AI stylist tells you how to wear it.*
 
 <!-- Drop a banner/hero image at docs/assets/banner.png and it will render here -->
 <img src="docs/assets/banner.png" alt="VTO — Virtual Try-On" width="720"/>
 
 [![App Store](https://img.shields.io/badge/App%20Store-Download-0D96F6?logo=apple&logoColor=white)](https://apps.apple.com/us/app/vto-virtual-try-on/id6769989598)
-![React Native](https://img.shields.io/badge/React%20Native-0.81-61DAFB?logo=react&logoColor=black)
-![Expo](https://img.shields.io/badge/Expo%20SDK-54-000020?logo=expo&logoColor=white)
-![Next.js](https://img.shields.io/badge/Next.js-14-000000?logo=nextdotjs&logoColor=white)
-![Supabase](https://img.shields.io/badge/Supabase-Postgres%20·%20Storage-3ECF8E?logo=supabase&logoColor=white)
-![Replicate](https://img.shields.io/badge/Replicate-IDM--VTON-000000?logo=replicate&logoColor=white)
+![React Native](https://img.shields.io/badge/React%20Native-0.83-61DAFB?logo=react&logoColor=black)
+![Expo](https://img.shields.io/badge/Expo%20SDK-55-000020?logo=expo&logoColor=white)
+![Next.js](https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white)
+![Supabase](https://img.shields.io/badge/Supabase-Postgres%20·%20Storage%20·%20Realtime-3ECF8E?logo=supabase&logoColor=white)
+![Fashn.ai](https://img.shields.io/badge/Fashn.ai-tryon--v1.6-111111)
+![Claude](https://img.shields.io/badge/Claude-AI%20Stylist-D97706)
 
 **Live on the App Store →** <https://apps.apple.com/us/app/vto-virtual-try-on/id6769989598>
 **Web →** <https://virtual-try-on-three-sage.vercel.app>
@@ -25,40 +26,41 @@
 
 ## What VTO is
 
-VTO is a mobile app that lets you try clothes on **before** buying them. You give it a
-photo of yourself and a photo of a garment; a **diffusion-based virtual try-on model**
-(IDM-VTON, via Replicate) composites them into a photorealistic image of you wearing it,
-in roughly **5–15 seconds**. Results land in your **Closet** and can be shared.
+VTO is an iOS app that lets you try clothes on **before** buying them. You take a selfie
+and pick a garment photo (or paste a product URL); the **Fashn.ai `tryon-v1.6`** virtual
+try-on model composites them into a photorealistic image of you wearing it in roughly
+**10–20 seconds**. A **Claude-powered AI Stylist** analyzes any garment and suggests three
+ways to wear it. Results land in your **Closet**, can be watermark-shared, and posted to
+an in-app **Community** feed.
 
-Built end-to-end as a final-year project — backend, mobile, AI pipeline, and App Store
-submission — and **live on the App Store** after passing App Review. No shortcuts.
+Built end-to-end solo — backend, mobile, AI pipeline, monetization, and App Store
+submission — and **live on the App Store** after passing App Review.
 
 ---
 
 ## The one idea that makes it durable: own your pixels
 
 The naive version of this app stores the URL the AI model hands back and calls it done.
-That app breaks the next morning. **Replicate's CDN URLs expire after ~1 hour** — store
-one in your database and every image in the user's closet goes blank by tomorrow.
-
-VTO's pipeline **re-hosts every result the moment it's generated**: the app downloads the
-fresh image and re-uploads it to **its own Supabase Storage**, so the database only ever
-holds a permanent URL it controls. The generated image is shown immediately while the
-permanent copy is saved in the background — fast *and* durable.
+That app breaks the next morning: **AI-provider CDN URLs expire**. VTO's pipeline
+**re-hosts every result the moment it's generated** — the webhook (or the polling
+fallback, whichever wins the atomic claim) downloads the fresh image and re-uploads it to
+**its own Supabase Storage**, so the database only ever holds a permanent URL it controls.
 
 ```
-person photo  +  garment image
+selfie  +  garment (photo or product URL)  +  category  +  quality mode
           │
           ▼
-   Next.js API route  ──►  Replicate · IDM-VTON
-   (server-side poll)      (diffusion virtual try-on)
-          │
-          ▼
-   generated image  (~5–15 s)
-          │
-          ├── shown immediately in the app
-          └── downloaded → re-uploaded to Supabase Storage
-                 permanent URL → Closet · Share
+   Next.js API route ──► Fashn.ai · tryon-v1.6
+   (auth + daily quota)        │
+          ┌────────────────────┤
+          ▼                    ▼
+   Supabase Realtime      webhook / polling  (atomic delete-claim — no double work)
+   broadcast to the app        │
+          ▼                    ▼
+   result on screen      re-uploaded to Supabase Storage (permanent URL)
+                               │
+                               ▼
+                    Closet · Share · Community
 ```
 
 ---
@@ -67,76 +69,102 @@ person photo  +  garment image
 
 ```mermaid
 flowchart TB
-    subgraph APP[iOS App · Expo / React Native]
-        H[Home · pick photos → generate]
-        C[Closet · past results]
-        S[Share]
+    subgraph APP[iOS App · Expo SDK 55 / RN 0.83]
+        H[Try On · selfie + garment + category]
+        ST2[Style · AI Stylist]
+        C[Closet 2.0 · wardrobe + outfits]
+        SH[Share · watermark + community]
     end
-    subgraph WEB[Next.js 14 · Vercel]
-        API[/api/generate · server-side poll/]
+    subgraph WEB[Next.js 16 · Vercel]
+        GEN[/api/generate/]
+        STY[/api/stylist/]
+        RCW[/api/webhook/revenuecat/]
+        FW[/api/webhook/fashn/]
     end
-    REP[Replicate · IDM-VTON]
+    FASHN[Fashn.ai · tryon-v1.6]
+    CLAUDE[Anthropic · Claude vision]
+    RC[RevenueCat]
     subgraph SB[Supabase]
         AUTH[Auth]
         DB[(Postgres · RLS)]
-        ST[Storage · permanent images]
+        STG[Storage · permanent images]
+        RT[Realtime · broadcast]
     end
-    H -->|person + garment| API
-    API -->|poll until ready| REP
-    REP -->|temporary CDN URL| API
-    API -->|result| H
-    H -->|download + re-upload| ST
-    ST --> C
+    H -->|Bearer + images| GEN --> FASHN
+    FASHN -->|webhook| FW -->|re-host| STG
+    FW -->|completed / failed + quota refund| RT --> H
+    ST2 -->|garment image| STY --> CLAUDE
+    RC -->|entitlement events| RCW -->|is_premium| DB
     H <--> AUTH
     DB <--> C
+    SH <--> DB
 ```
 
-The diffusion call runs **server-side** in a Next.js API route so the Replicate token
-never ships in the app. The mobile client polls until the result is ready.
+Every AI call runs **server-side** so no API key ever ships in the app. Results arrive by
+Supabase Realtime broadcast with a 10-second polling fallback; both paths race for an
+atomic claim on the pending row, so exactly one of them persists the image.
 
 ---
 
 ## Repository layout
 
 ```
-/                           # Next.js web app (Vercel)
+/                              # Next.js 16 backend + marketing site (Vercel)
   src/app/
-    page.tsx                # landing page
-    api/generate/route.ts   # Replicate polling endpoint (server-side)
-    privacy/page.tsx        # privacy policy
-  .env.example
+    page.tsx                   # dark landing page (App Store support URL)
+    support/ · terms/ · privacy/
+    api/
+      generate/route.ts        # auth + quota + Fashn.ai kickoff (category, quality mode)
+      predictions/[id]/route.ts# polling fallback with atomic claim
+      stylist/route.ts         # Claude vision — garment analysis + 3 suggestions
+      report/route.ts          # real content-report intake (UGC compliance)
+      scrape/route.ts          # authed, SSRF-hardened product-URL scraper
+      webhook/fashn/route.ts   # fail-closed secret, re-host, quota refund on failure
+      webhook/revenuecat/route.ts # server-side entitlement sync (is_premium)
+      cron/cleanup/route.ts    # daily pending_generations TTL sweep
+  supabase_schema.sql · supabase_freemium.sql · supabase_v1_1.sql
+  vercel.json                  # cron schedule
 
-ai-vto-mobile/              # Expo / React Native app (iOS)
+ai-vto-mobile/                 # Expo / React Native app (iOS, dark-only)
   app/
-    auth.tsx                # sign in / sign up
+    onboarding.tsx             # first-launch 3-slide intro + demo garment
+    auth.tsx
     (tabs)/
-      home.tsx              # try-on: pick photos → generate → save
-      analysis.tsx          # fit analysis
-      history.tsx           # closet — past generations grid
-      stylist.tsx           # AI stylist chat
-      share.tsx             # share a look
+      home.tsx                 # try-on flow: selfie → garment → category → generate
+      stylist.tsx              # real AI stylist (Claude-backed)
+      analysis.tsx             # fit analysis — measurements + size chart
+      history.tsx              # Closet 2.0 — categories, outfits, daily reminder
+      share.tsx                # watermark share + community feed
+      profile.tsx              # subscription status, account, deletion
   src/lib/
-    supabase.ts             # client + session
-    storage.ts              # native binary upload to Supabase Storage
-    savedPhotos.ts          # camera-roll helpers
-    savedGarments.ts        # local garment persistence
-  .env.example
+    analytics.ts               # event tracking → Supabase events table
+    sentry.ts                  # DSN-gated crash reporting
+    premium.ts · notifications.ts · outfits.ts
+    savedPhotos.ts · savedGarments.ts   # per-user scoped local persistence
 ```
 
 ---
 
-## What VTO does today
+## What VTO does today (v1.1)
 
 | Capability | State | Notes |
 |---|---|---|
-| Virtual try-on | Done | IDM-VTON diffusion, ~5–15 s per generation. |
-| Server-side generation | Done | Next.js API route; Replicate token stays server-side. |
-| Permanent result storage | Done | Re-upload to Supabase so closets never go blank. |
-| Closet | Done | Grid of past generations, persisted. |
-| Native binary upload | Done | `FileSystem.uploadAsync` — no broken RN blobs. |
-| Auth & RLS | Done | Supabase Auth + Row Level Security. |
-| Share a look | Done | Share generated results. |
-| App Store release | Done | Live, passed App Review. |
+| Virtual try-on | Done | Fashn.ai tryon-v1.6, ~10–20 s, webhook + Realtime + polling fallback. |
+| Garment categories | Done | Tops / bottoms / full-body — correct model params per garment type. |
+| Quality mode | Done | Premium-gated `quality` mode, server-enforced. |
+| Try-on from URL | Done | Paste a product link — authed, SSRF-hardened scraper pulls the garment. |
+| AI Stylist | Done | Claude vision analyzes the garment, returns 3 personalized outfit ideas. |
+| Fit Analysis | Done | Measurements (chest/waist/hips) + size chart, no fake timers. |
+| Closet 2.0 | Done | Categorized wardrobe, outfit builder, daily outfit reminder. |
+| Community | Done | Post looks, likes (RPC, optimistic), views, weekly style challenge. |
+| Watermark share | Done | Branded share card captured on-device. |
+| Freemium | Done | 5 free generations/day, quota refunded on AI failure. |
+| Server-side entitlements | Done | RevenueCat webhook owns `is_premium` — no client writes. |
+| Content reporting | Done | Real `reports` intake, rate-limited (UGC / Guideline 1.2). |
+| Observability | Done | Sentry (DSN-gated) + product analytics events table. |
+| Privacy compliance | Done | Honest permission strings, full `PrivacyInfo.xcprivacy` data types. |
+| Onboarding | Done | 3-slide intro + bundled demo garment for a first-run wow. |
+| App Store release | Live | v1.0 approved; v1.1 package ready for submission. |
 
 ---
 
@@ -144,10 +172,13 @@ ai-vto-mobile/              # Expo / React Native app (iOS)
 
 | Layer | Technology |
 |---|---|
-| Mobile | Expo SDK 54 · React Native 0.81 · Expo Router (file-based) |
-| Web | Next.js 14, deployed on Vercel |
-| Backend | Supabase — Postgres, Auth, Storage (RLS) |
-| AI model | Replicate — IDM-VTON |
+| Mobile | Expo SDK 55 · React Native 0.83 · React 19.2 · Expo Router |
+| Web/API | Next.js 16 (App Router), deployed on Vercel |
+| Data | Supabase — Postgres (RLS), Auth, Storage, Realtime |
+| AI try-on | Fashn.ai — tryon-v1.6 |
+| AI stylist | Anthropic Claude (vision, structured output) |
+| Payments | RevenueCat + App Store subscriptions (server-side webhook sync) |
+| Crash/analytics | Sentry · first-party events table |
 | Build & submit | EAS Build + EAS Submit |
 
 ---
@@ -157,7 +188,7 @@ ai-vto-mobile/              # Expo / React Native app (iOS)
 **Web**
 ```bash
 npm install
-cp .env.example .env.local
+cp .env.example .env.local   # fill in keys — see the file for every variable
 npm run dev
 ```
 
@@ -165,23 +196,21 @@ npm run dev
 ```bash
 cd ai-vto-mobile
 npm install
-cp .env.example .env
 npx expo start
 ```
 
-Environment variables:
+Mobile env (EAS production profile already carries these):
 
 ```
-# web
-REPLICATE_API_TOKEN=
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-
-# mobile
 EXPO_PUBLIC_SUPABASE_URL=
 EXPO_PUBLIC_SUPABASE_ANON_KEY=
 EXPO_PUBLIC_BACKEND_URL=        # deployed Next.js URL
+EXPO_PUBLIC_REVENUECAT_IOS_KEY=
+EXPO_PUBLIC_SENTRY_DSN=         # optional — Sentry is a no-op without it
 ```
+
+Database: run `supabase_schema.sql`, `supabase_freemium.sql`, then `supabase_v1_1.sql`
+in the Supabase SQL editor (all idempotent).
 
 ### Build & deploy
 
@@ -189,23 +218,27 @@ EXPO_PUBLIC_BACKEND_URL=        # deployed Next.js URL
 # web — push to main, Vercel auto-deploys
 
 # iOS
+cd ai-vto-mobile
 eas build  --platform ios --profile production
 eas submit --platform ios
 ```
 
 ---
 
-## Two things I learned the hard way
+## Three things learned the hard way
 
 **1. `fetch().blob()` is broken on React Native.**
 Fetch a remote URL and call `.blob()` and React Native silently hands back an *empty*
-blob. The upload to Supabase succeeds, the DB row is written — but the stored file is
-zero bytes. Hours of blaming Supabase before realizing the blob was empty all along. Fix:
-`FileSystem.downloadAsync` to a local cache file, then `FileSystem.uploadAsync` with
-`BINARY_CONTENT` to send it natively, no JS serialization.
+blob. The upload succeeds, the DB row is written — but the stored file is zero bytes.
+Fix: download to a local cache file, then upload natively as binary content.
 
-**2. Replicate CDN URLs expire.**
-Generated images are served from a Replicate CDN with roughly a one-hour TTL. Store that
-URL in your database and your entire history is broken by the next day. The fix is an
-immediate re-upload to your own storage — Supabase here — so the DB always holds a
+**2. AI-provider CDN URLs expire.**
+Store the model's output URL in your database and your entire history is broken by the
+next day. The fix is an immediate re-upload to your own storage so the DB always holds a
 permanent URL. Not obvious until your closet tab goes blank.
+
+**3. Webhooks and polling race — make persistence atomic.**
+With both a webhook and a polling fallback able to persist the same result, you get
+duplicates or, worse, cross-user mismatches. VTO resolves it with an atomic
+delete-claim on the pending row: exactly one path wins, and results are looked up by
+`prediction_id`, never by "latest generation".
