@@ -6,10 +6,14 @@ import { supabase } from '../src/lib/supabase';
 import { Session } from '@supabase/supabase-js';
 import { ProfileProvider } from '../src/context/ProfileContext';
 import Purchases from 'react-native-purchases';
+import { initSentry, wrapRootComponent } from '../src/lib/sentry';
 
 const REVENUECAT_IOS_KEY = process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY ?? '';
 
-export default function RootLayout() {
+// Initialize crash reporting as early as possible (no-op without a DSN).
+initSentry();
+
+function RootLayout() {
   const [session, setSession] = useState<Session | null>(null);
 
   useEffect(() => {
@@ -72,9 +76,12 @@ export default function RootLayout() {
     <ProfileProvider>
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="index" />
+        <Stack.Screen name="onboarding" />
         <Stack.Screen name="auth" options={{ presentation: 'modal' }} />
         <Stack.Screen name="(tabs)" />
       </Stack>
     </ProfileProvider>
   );
 }
+
+export default wrapRootComponent(RootLayout);
