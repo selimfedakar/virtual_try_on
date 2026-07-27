@@ -1,19 +1,20 @@
 import { Redirect } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { View, ActivityIndicator } from 'react-native';
-import { supabase } from '../src/lib/supabase';
-import { Session } from '@supabase/supabase-js';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const ONBOARDING_KEY = 'vto_onboarding_done';
 
 export default function Index() {
-  const [session, setSession] = useState<Session | null | undefined>(undefined);
+  const [onboardingDone, setOnboardingDone] = useState<boolean | undefined>(undefined);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-    });
+    AsyncStorage.getItem(ONBOARDING_KEY)
+      .then(flag => setOnboardingDone(!!flag))
+      .catch(() => setOnboardingDone(true)); // fail open — never trap users in onboarding
   }, []);
 
-  if (session === undefined) {
+  if (onboardingDone === undefined) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }}>
         <ActivityIndicator size="large" color="#fff" />
@@ -21,6 +22,9 @@ export default function Index() {
     );
   }
 
-  // Signed-in users go to home; guests also go to home (auth is optional)
+  // First launch → onboarding; otherwise straight to home (auth is optional).
+  if (!onboardingDone) {
+    return <Redirect href="/onboarding" />;
+  }
   return <Redirect href="/(tabs)/home" />;
 }
