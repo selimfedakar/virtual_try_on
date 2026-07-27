@@ -1,6 +1,6 @@
 ================================================================================
-  VTO — App Store Metadata
-  Hazırlık dosyası — Apple Store Connect'e girerken buradan kopyala-yapıştır
+  VTO — App Store Metadata (v1.1)
+  Hazırlık dosyası — App Store Connect'e girerken buradan kopyala-yapıştır
 ================================================================================
 
 
@@ -24,47 +24,65 @@ Try On Any Outfit with AI
 
 VTO lets you try on any outfit before you buy it — powered by AI.
 
-Just snap a photo of yourself and a garment you love. VTO's AI instantly shows you exactly how that piece would look on your body, your style, your way.
+Just snap a selfie and pick a garment you love — from your camera roll or by
+pasting a product link. VTO's AI shows you exactly how that piece would look on
+you in seconds.
 
 WHY VTO?
 • No more returns — see the fit before you commit
-• Shop smarter with AI-powered virtual try-ons
-• Build your virtual Closet and revisit every past look
-• Get personalized tips from your AI Stylist
-• Share your favorite outfits with friends instantly
+• Tops, bottoms and full-body outfits — pick the right category for the best result
+• Ask the AI Stylist: it analyzes any garment and suggests 3 ways to wear it
+• Build your Closet: categorize garments, combine them into outfits
+• Share watermarked looks and post them to the VTO community
+• Fit Analysis: size estimates from your own measurements
 
 HOW IT WORKS
-1. Upload your photo or take one in-app
-2. Add a garment from your camera roll
-3. Tap Generate — AI does the rest in seconds
-4. Save to your camera roll, share, or ask your Stylist for advice
+1. Take a selfie in-app (front camera)
+2. Add a garment from your camera roll — or paste a product URL
+3. Choose the garment type and tap Preview — AI does the rest in seconds
+4. Save, share, post to the community, or ask the AI Stylist for advice
 
 FEATURES
-→ Photorealistic AI try-on powered by state-of-the-art models
-→ Closet: your personal history of every generated look
-→ Fit Analysis: understand your measurements and proportions
-→ Style Guide: curated outfit ideas to help you wear any garment 3 different ways
-→ Share tab: pick your best look and post it anywhere
+→ Photorealistic AI try-on powered by a state-of-the-art try-on model
+→ AI Stylist: real garment analysis with personalized outfit suggestions
+→ Closet 2.0: categorized wardrobe, outfit builder, daily outfit reminder
+→ Community: share your best looks, like and browse other stylists
+→ Fit Analysis: measurement-based size recommendations
+→ High-quality generation mode for Premium members
 
-Whether you're refreshing your wardrobe, shopping online, or exploring a new style — VTO is your personal AI fashion studio, always in your pocket.
+VTO PREMIUM
+Free members get 5 AI generations per day. Premium unlocks unlimited
+generations and high-quality mode. Subscriptions are billed through your
+App Store account and can be managed or cancelled anytime in Settings.
+
+Your privacy matters: photos you select are securely sent to our AI service
+only to generate your preview, and are never shared with third parties for
+marketing.
 
 Download VTO and never buy the wrong outfit again.
 
 
 ────────────────────────────────────────────────────────────────────────────────
-  KEYWORDS  (tam 100 karakter — virgülle ayrılı, boşluk yok)
+  KEYWORDS  (maks. 100 karakter — virgülle ayrılı, boşluk yok)
 ────────────────────────────────────────────────────────────────────────────────
 
 virtual try on,fashion,outfit,AI style,wardrobe,clothes,fit,stylist,tryon,dressing,look,shop,ootd,ai
 
 
 ────────────────────────────────────────────────────────────────────────────────
-  WHAT'S NEW  (ilk sürüm)
+  WHAT'S NEW  (v1.1)
 ────────────────────────────────────────────────────────────────────────────────
 
-Welcome to VTO — your AI-powered fashion studio.
+The biggest VTO update yet:
 
-Try on any outfit instantly with AI, save your favorites to your Closet, and get personalized style advice from your AI Stylist. This is the first release — more features are on the way.
+• REAL AI Stylist — it now analyzes your garment and suggests 3 personalized ways to wear it
+• Bottoms & full-body support — choose the garment type for far better results
+• Try on from a link — paste any product URL
+• Closet 2.0 — categorize garments, build outfits, get a daily outfit reminder
+• Community — post your looks, like and browse other stylists' looks
+• High-quality mode for Premium members
+• Fit Analysis now uses your real measurements
+• Faster, safer and more reliable generation under the hood
 
 
 ────────────────────────────────────────────────────────────────────────────────
@@ -93,27 +111,34 @@ https://virtual-try-on-three-sage.vercel.app/privacy
   SUPPORT URL
 ────────────────────────────────────────────────────────────────────────────────
 
-https://virtual-try-on-three-sage.vercel.app
+https://virtual-try-on-three-sage.vercel.app/support
+(Marketing URL olarak kök site kullanılabilir: https://virtual-try-on-three-sage.vercel.app)
 
 
 ────────────────────────────────────────────────────────────────────────────────
-  EAS.JSON — DOLDURMANI GEREKEN DEĞERLER
+  APP PRIVACY (ASC "App Privacy" bölümü — PrivacyInfo.xcprivacy ile AYNI olmalı)
 ────────────────────────────────────────────────────────────────────────────────
 
-appleTeamId  →  Apple Developer hesabından al: developer.apple.com/account
-                (10 karakterlik kod, örn: ABC1234567)
+Data collected, linked to identity, App Functionality only, NO tracking:
+  • Photos or Videos   (selfie + garment photos, try-on results)
+  • Email Address      (account)
+  • User ID            (Supabase user id)
+  • Purchase History   (subscription state)
 
-ascAppId     →  App Store Connect'te uygulama oluşturduktan sonra
-                "App Information" sayfasında "Apple ID" olarak görünür
-                (10 haneli sayı, örn: 1234567890)
+Data collected, NOT linked to identity, App Functionality only:
+  • Crash Data         (Sentry)
+  • Performance Data   (Sentry)
+
+"Do you or your third-party partners track users?" → NO
 
 
 ────────────────────────────────────────────────────────────────────────────────
   BUILD & SUBMIT KOMUTLARI (sırasıyla çalıştır)
 ────────────────────────────────────────────────────────────────────────────────
 
-1. eas build --platform ios --profile production
-2. eas submit --platform ios
+1. cd ai-vto-mobile
+2. eas build --platform ios --profile production
+3. eas submit --platform ios --latest
 
 
 ────────────────────────────────────────────────────────────────────────────────
@@ -125,15 +150,25 @@ Demo Account (pre-created, ready to use):
   Password: Review2026!
 
 Steps to test:
-1. Open the app and sign in with the credentials above.
-2. On the Home tab, tap "Add Photo" to upload a person photo.
-3. Tap "Add Garment" to upload a clothing image.
-4. Tap "Generate" — AI produces a virtual try-on result in ~20-60 seconds.
-5. Save the result to your camera roll or visit the Closet tab to see past results.
-6. Tap the Stylist tab to get AI-powered style advice.
+1. Open the app (first launch shows a short onboarding) and sign in with the
+   credentials above.
+2. On the Try On tab, tap Camera to take a selfie (front camera).
+3. Pick a garment photo from the library — or tap "Try a sample garment" /
+   "Paste product link".
+4. Select the garment type (Top / Bottom / Full Body) and tap "Preview My
+   Outfit" — the AI produces the try-on result in ~10-60 seconds.
+5. Visit the Style tab for AI garment analysis and outfit suggestions.
+6. Visit the Closet tab for past results, wardrobe categories and outfits;
+   the Share tab for watermarked sharing and the community feed.
+7. Content can be reported from the result screen ("Flag Inappropriate
+   Content") — reports are stored and reviewed.
 
-Note: The AI generation step calls an external API (Fashn.ai) and may take
-up to 60 seconds depending on server load. This is expected behavior.
-
+Notes:
+- The AI generation step calls an external try-on API (Fashn.ai) and may take
+  up to 60 seconds under load. This is expected behavior.
+- The AI Stylist calls a vision LLM server-side; free accounts get 10 stylist
+  requests/day.
+- Subscriptions: monthly (and annual when configured) via RevenueCat; free
+  tier is 5 generations/day.
 
 ================================================================================
