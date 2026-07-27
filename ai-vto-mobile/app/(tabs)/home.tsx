@@ -2,17 +2,20 @@ import { StatusBar } from 'expo-status-bar';
 import {
   StyleSheet, Text, View, TouchableOpacity, Image,
   SafeAreaView, ScrollView, ActivityIndicator, Alert, Animated,
-  Modal, Pressable,
+  Modal, Pressable, Linking,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
-import * as FileSystem from 'expo-file-system/legacy';
+import { File, Paths } from 'expo-file-system';
+import { Asset } from 'expo-asset';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { useState, useRef, useEffect } from 'react';
 import React from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
+import Purchases from 'react-native-purchases';
 import { supabase } from '../../src/lib/supabase';
+import { track } from '../../src/lib/analytics';
 import AppHeader from '../../src/components/AppHeader';
 import PaywallModal from '../../src/components/PaywallModal';
 import AIConsentModal from '../../src/components/AIConsentModal';
@@ -26,12 +29,22 @@ import { saveGarment } from '../../src/lib/savedGarments';
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL ?? 'https://virtual-try-on-three-sage.vercel.app';
 const GENERATE_TIMEOUT_MS = 30_000;
 const REALTIME_TIMEOUT_MS = 180_000;
+const DEMO_GARMENT_USED_KEY = 'vto_demo_garment_used';
 
 const STEPS = [
-  { num: '1', icon: '📷', label: 'Your Photo' },
-  { num: '2', icon: '👕', label: 'Garment' },
-  { num: '3', icon: '🤖', label: 'AI Generate' },
-  { num: '4', icon: '✨', label: 'Result' },
+  { num: '1', icon: '🤳', label: 'Your Selfie' },
+  { num: '2', icon: '👕', label: 'Clothing Item' },
+  { num: '3', icon: '🤖', label: 'AI Preview' },
+  { num: '4', icon: '✨', label: 'Style Result' },
+];
+
+type GarmentCategory = 'tops' | 'bottoms' | 'one-piece';
+type QualityMode = 'balanced' | 'quality';
+
+const CATEGORY_OPTIONS: { value: GarmentCategory; label: string }[] = [
+  { value: 'tops', label: 'Top' },
+  { value: 'bottoms', label: 'Bottom' },
+  { value: 'one-piece', label: 'Full Body' },
 ];
 
 async function compressToBase64(uri: string): Promise<string> {
@@ -49,24 +62,34 @@ export default function Home() {
   const [selectedPhoto, setSelectedPhoto] = useState<SavedPhoto | null>(null);
   const [garmentUri, setGarmentUri] = useState<string | null>(null);
   const [garmentBase64, setGarmentBase64] = useState<string | null>(null);
+  const [garmentCategory, setGarmentCategory] = useState<GarmentCategory | null>(null);
+  const [qualityMode, setQualityMode] = useState<QualityMode>('balanced');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isImportingUrl, setIsImportingUrl] = useState(false);
   const [loadingStep, setLoadingStep] = useState('');
   const [resultImage, setResultImage] = useState<string | null>(null);
   const [showDeleteModal, setShowDeleteModal] = useState<SavedPhoto | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [showPaywall, setShowPaywall] = useState(false);
   const [showAIConsent, setShowAIConsent] = useState(false);
+  const [showDemoChip, setShowDemoChip] = useState(false);
 
   const [showPhotoPolicy, setShowPhotoPolicy] = useState(false);
   const pendingPhotoAction = useRef<(() => void) | null>(null);
 
-  const scanAnim = useRef(new Animated.Value(0)).current;
   const glowAnim = useRef(new Animated.Value(0.4)).current;
 
   // Reload photos whenever the tab is focused (covers login/switch-user scenarios)
   useFocusEffect(
     React.useCallback(() => { loadPhotos(); }, [])
   );
+
+  // One-time "Try a sample garment" chip for fresh installs
+  useEffect(() => {
+    AsyncStorage.getItem(DEMO_GARMENT_USED_KEY)
+      .then(flag => setShowDemoChip(!flag))
+      .catch(() => {});
+  }, []);
 
   // Clear all in-memory state immediately on logout so the next user never
   // sees the previous user's photos/garments/results in React state.
@@ -77,6 +100,7 @@ export default function Home() {
         setSelectedPhoto(null);
         setGarmentUri(null);
         setGarmentBase64(null);
+        setGarmentCategory(null);
         setResultImage(null);
       } else if (event === 'SIGNED_IN') {
         loadPhotos();
@@ -87,20 +111,14 @@ export default function Home() {
 
   useEffect(() => {
     if (!resultImage) return;
-    const scan = Animated.loop(
-      Animated.sequence([
-        Animated.timing(scanAnim, { toValue: 1, duration: 2400, useNativeDriver: true }),
-        Animated.timing(scanAnim, { toValue: 0, duration: 2400, useNativeDriver: true }),
-      ])
-    );
     const glow = Animated.loop(
       Animated.sequence([
         Animated.timing(glowAnim, { toValue: 1, duration: 1600, useNativeDriver: true }),
         Animated.timing(glowAnim, { toValue: 0.4, duration: 1600, useNativeDriver: true }),
       ])
     );
-    scan.start(); glow.start();
-    return () => { scan.stop(); glow.stop(); };
+    glow.start();
+    return () => { glow.stop(); };
   }, [resultImage]);
 
   const requestPhotoWithPolicy = async (action: () => void) => {
@@ -119,10 +137,23 @@ export default function Home() {
     if (photos.length > 0) setSelectedPhoto(photos[0]);
   };
 
+  const showPermissionAlert = (title: string, message: string) => {
+    Alert.alert(title, message, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Open Settings', onPress: () => Linking.openSettings() },
+    ]);
+  };
+
   const addFromCamera = async () => {
     const perm = await ImagePicker.requestCameraPermissionsAsync();
-    if (!perm.granted) { Alert.alert('Permission needed', 'Camera access is required.'); return; }
-    const result = await ImagePicker.launchCameraAsync({ allowsEditing: true, aspect: [3, 4], quality: 0.8 });
+    if (!perm.granted) {
+      showPermissionAlert(
+        'Camera Access Needed',
+        'VTO needs camera access to take your try-on selfie. You can enable it in Settings.',
+      );
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({ cameraType: ImagePicker.CameraType.front, allowsEditing: true, aspect: [3, 4], quality: 0.8 });
     if (!result.canceled) {
       const saved = await savePhoto(result.assets[0].uri);
       setSavedPhotos(prev => [saved, ...prev]);
@@ -138,24 +169,137 @@ export default function Home() {
     setShowDeleteModal(null);
   };
 
+  const clearGarment = () => {
+    setGarmentUri(null);
+    setGarmentBase64(null);
+    setGarmentCategory(null);
+  };
+
+  const setGarmentFromUri = async (uri: string) => {
+    setGarmentUri(uri);
+    setGarmentBase64(null);
+    setGarmentCategory(null); // category is a mandatory, explicit choice per garment
+    setResultImage(null);
+    saveGarment(uri).catch(() => {});
+    try {
+      const b64 = await compressToBase64(uri);
+      setGarmentBase64(b64);
+    } catch {
+      clearGarment();
+      Alert.alert('Image Error', 'Could not process that image. Please choose a different photo.');
+    }
+  };
+
   const pickGarment = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [3, 4], quality: 0.5,
+      mediaTypes: ['images'], allowsEditing: true, aspect: [3, 4], quality: 0.5,
     });
     if (!result.canceled) {
-      const uri = result.assets[0].uri;
+      await setGarmentFromUri(result.assets[0].uri);
+    }
+  };
+
+  const tryDemoGarment = async () => {
+    try {
+      const asset = Asset.fromModule(require('../../assets/demo-garment.jpg'));
+      await asset.downloadAsync();
+      const uri = asset.localUri ?? asset.uri;
+      const b64 = await compressToBase64(uri);
       setGarmentUri(uri);
+      setGarmentBase64(b64);
+      setGarmentCategory('tops'); // the bundled sample is a shirt — known category
       setResultImage(null);
-      saveGarment(uri).catch(() => {});
-      compressToBase64(uri).then(b64 => setGarmentBase64(b64)).catch(() => {});
+      await AsyncStorage.setItem(DEMO_GARMENT_USED_KEY, '1');
+      setShowDemoChip(false);
+    } catch {
+      Alert.alert('Error', 'Could not load the sample garment. Please pick a photo instead.');
+    }
+  };
+
+  const importFromUrl = () => {
+    Alert.prompt(
+      'Paste Product Link',
+      'Enter a product page URL and we will grab the garment photo for you.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Import', onPress: (url?: string) => { if (url?.trim()) handleUrlImport(url.trim()); } },
+      ],
+      'plain-text',
+      '',
+      'url',
+    );
+  };
+
+  const handleUrlImport = async (url: string) => {
+    setIsImportingUrl(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        router.push('/auth');
+        return;
+      }
+      const res = await fetch(`${BACKEND_URL}/api/scrape`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ url }),
+      });
+      const d = await res.json();
+      if (!res.ok || !d.success || !d.data?.image) {
+        throw new Error('No garment photo found at that link. Try a direct product page URL.');
+      }
+      // Download the scraped image to cache so we can compress it locally
+      const dest = new File(Paths.cache, `garment_import_${Date.now()}.jpg`);
+      const file = await File.downloadFileAsync(d.data.image, dest);
+      const b64 = await compressToBase64(file.uri);
+      setGarmentUri(file.uri);
+      setGarmentBase64(b64);
+      setGarmentCategory(null); // still requires an explicit category choice
+      setResultImage(null);
+      saveGarment(file.uri).catch(() => {});
+      track('url_import_used');
+    } catch (err: any) {
+      const isNetworkError = err?.message?.toLowerCase?.().includes('network') || err?.name === 'AbortError';
+      Alert.alert(
+        'Import Failed',
+        isNetworkError
+          ? 'Could not reach the server. Please check your internet connection and try again.'
+          : (err?.message ?? 'Could not import a garment from that link.'),
+      );
+    } finally {
+      setIsImportingUrl(false);
+    }
+  };
+
+  const selectQualityMode = async (mode: QualityMode) => {
+    if (mode === 'balanced') {
+      setQualityMode('balanced');
+      return;
+    }
+    try {
+      const customerInfo = await Purchases.getCustomerInfo();
+      const isPremium = !!customerInfo.entitlements.active['premium'];
+      if (isPremium) {
+        setQualityMode('quality');
+      } else {
+        Alert.alert(
+          'Premium Feature',
+          'High Quality mode renders sharper, more detailed try-ons and is part of VTO Premium. Upgrade to unlock it.',
+        );
+      }
+    } catch {
+      Alert.alert('Error', 'Could not verify your subscription. Please try again.');
     }
   };
 
   const handleGenerate = async () => {
-    if (!selectedPhoto || !garmentBase64) return;
+    if (!selectedPhoto || !garmentBase64 || !garmentCategory) return;
     setIsGenerating(true);
     setResultImage(null);
     setLoadingStep('Sending to AI...');
+    track('generate_started', { category: garmentCategory, mode: qualityMode });
 
     let channel: ReturnType<typeof supabase.channel> | null = null;
     let realtimeTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -196,6 +340,8 @@ export default function Home() {
           body: JSON.stringify({
             baseImage: `data:image/jpeg;base64,${personBase64}`,
             garments: [{ image: `data:image/jpeg;base64,${garmentCompressed}`, title: 'Mobile Upload' }],
+            category: garmentCategory,
+            mode: qualityMode,
           }),
         });
       } finally {
@@ -206,6 +352,7 @@ export default function Home() {
 
       // Quota exceeded → show paywall
       if (!data.success && data.error === 'daily_limit_reached') {
+        track('paywall_shown', { source: 'daily_limit' });
         setShowPaywall(true);
         setIsGenerating(false);
         setLoadingStep('');
@@ -217,18 +364,23 @@ export default function Home() {
       const predictionId: string = data.data.predictionId;
       setLoadingStep('AI is generating your look...');
 
+      const onResult = (imageUrl: string) => {
+        cleanup();
+        track('generate_succeeded');
+        setResultImage(imageUrl);
+        setGarmentUri(null);
+        setGarmentBase64(null);
+        setGarmentCategory(null);
+        setIsGenerating(false);
+        setLoadingStep('');
+      };
+
       // Subscribe to Supabase Realtime — webhook broadcasts result instantly
       channel = supabase
         .channel(`generation:${session.user.id}`)
         .on('broadcast', { event: 'completed' }, ({ payload }) => {
           if (payload.predictionId !== predictionId) return;
-
-          cleanup();
-          setResultImage(payload.imageUrl);
-          setGarmentUri(null);
-          setGarmentBase64(null);
-          setIsGenerating(false);
-          setLoadingStep('');
+          onResult(payload.imageUrl);
         })
         .subscribe();
 
@@ -243,14 +395,10 @@ export default function Home() {
           });
           const d = await res.json();
           if (d.success && d.status === 'succeeded' && d.data?.generatedImage) {
-            cleanup();
-            setResultImage(d.data.generatedImage);
-            setGarmentUri(null);
-            setGarmentBase64(null);
-            setIsGenerating(false);
-            setLoadingStep('');
+            onResult(d.data.generatedImage);
           } else if (d.success && d.status === 'failed') {
             cleanup();
+            track('generate_failed', { reason: 'ai_failed' });
             Alert.alert('Error', 'AI generation failed. Please try again.');
             setIsGenerating(false);
             setLoadingStep('');
@@ -261,6 +409,7 @@ export default function Home() {
       // 3-minute safety timeout if neither Realtime nor polling delivers
       realtimeTimeout = setTimeout(() => {
         cleanup();
+        track('generate_failed', { reason: 'timeout' });
         setIsGenerating(false);
         setLoadingStep('');
         Alert.alert('Timed out', 'Generation took too long. Please try again.');
@@ -278,6 +427,8 @@ export default function Home() {
         err.name === 'AbortError' ||
         err.message?.toLowerCase().includes('network') ||
         err.message?.toLowerCase().includes('fetch');
+
+      track('generate_failed', { reason: isNetworkError ? 'network' : (err.message ?? 'unknown') });
 
       if (isNetworkError) {
         Alert.alert('Connection Failed', 'Could not reach the server. Please check your internet connection and try again.');
@@ -309,12 +460,15 @@ export default function Home() {
     try {
       const { status } = await MediaLibrary.requestPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission needed', 'Photo library access is required to save images.');
+        showPermissionAlert(
+          'Photo Access Needed',
+          'VTO needs permission to save images to your photo library. You can enable it in Settings.',
+        );
         return;
       }
-      const localUri = FileSystem.cacheDirectory + 'tryon_save.jpg';
-      const { uri } = await FileSystem.downloadAsync(resultImage, localUri);
-      await MediaLibrary.saveToLibraryAsync(uri);
+      const dest = new File(Paths.cache, `tryon_save_${Date.now()}.jpg`);
+      const file = await File.downloadFileAsync(resultImage, dest);
+      await MediaLibrary.saveToLibraryAsync(file.uri);
       Alert.alert('Saved!', 'Your try-on image has been saved to your photo library.');
     } catch {
       Alert.alert('Error', 'Could not save the image. Please try again.');
@@ -323,22 +477,48 @@ export default function Home() {
     }
   };
 
+  const submitReport = async (reason: string) => {
+    if (!resultImage) return;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        router.push('/auth');
+        return;
+      }
+      const res = await fetch(`${BACKEND_URL}/api/report`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ imageUrl: resultImage, reason }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok || d?.success === false) throw new Error();
+      track('report_submitted');
+      Alert.alert('Reported — thank you', 'Our moderation team will review this content promptly. Generating objectionable content is strictly prohibited and can lead to account suspension.');
+    } catch {
+      Alert.alert('Report Failed', 'Could not submit your report. Please check your connection and try again.');
+    }
+  };
+
   const handleReportContent = () => {
     Alert.alert(
       'Report Content',
-      'Thank you for helping keep VTO safe. This result has been flagged for our moderation team. Any generation of objectionable or inappropriate content is strictly prohibited and results in permanent account suspension.',
+      'Why are you reporting this result?',
       [
-        { text: 'Submit Report', style: 'destructive', onPress: () => Alert.alert('Reported', 'Your report has been received. We will review it promptly.') },
+        { text: 'Inappropriate content', onPress: () => submitReport('inappropriate_content') },
+        { text: "Doesn't look right", onPress: () => submitReport('bad_result') },
+        { text: 'Other', onPress: () => submitReport('other') },
         { text: 'Cancel', style: 'cancel' },
       ]
     );
   };
 
-  const canGenerate = selectedPhoto !== null && garmentBase64 !== null && !isGenerating;
+  const canGenerate = selectedPhoto !== null && garmentBase64 !== null && garmentCategory !== null && !isGenerating;
 
-  // ── Result / AR screen ──────────────────────────────────────────────
+  // ── Result screen ───────────────────────────────────────────────────
   if (resultImage) {
-    const scanY = scanAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 450] });
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar style="light" />
@@ -348,7 +528,7 @@ export default function Home() {
             <Text style={styles.resultTitle}>Your New Look</Text>
             <View style={styles.arBadge}>
               <Animated.View style={[styles.arDot, { opacity: glowAnim }]} />
-              <Text style={styles.arBadgeText}>LIVE PREVIEW</Text>
+              <Text style={styles.arBadgeText}>AI PREVIEW</Text>
             </View>
           </View>
           <View style={styles.arFrame}>
@@ -357,10 +537,6 @@ export default function Home() {
             <View style={[styles.corner, styles.bl]} />
             <View style={[styles.corner, styles.br]} />
             <Image source={{ uri: resultImage }} style={styles.resultImage} />
-            <Animated.View style={[styles.scanLine, { transform: [{ translateY: scanY }] }]} />
-            <View style={styles.arFitBadge}>
-              <Text style={styles.arFitText}>✓ FIT DETECTED</Text>
-            </View>
           </View>
           <TouchableOpacity style={styles.primaryBtn} onPress={() => setResultImage(null)}>
             <Text style={styles.primaryBtnText}>Try Another Outfit</Text>
@@ -497,7 +673,7 @@ export default function Home() {
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Garment</Text>
           {garmentUri && (
-            <TouchableOpacity onPress={() => { setGarmentUri(null); setGarmentBase64(null); }}>
+            <TouchableOpacity onPress={clearGarment}>
               <Text style={styles.clearText}>Clear</Text>
             </TouchableOpacity>
           )}
@@ -515,9 +691,75 @@ export default function Home() {
             <TouchableOpacity style={styles.garmentPlaceholder} onPress={pickGarment}>
               <Text style={styles.garmentPlaceholderEmoji}>👕</Text>
               <Text style={styles.garmentPlaceholderText}>Choose a clothing item</Text>
-              <Text style={styles.garmentPlaceholderSub}>Upload a photo of a garment you want to try on</Text>
+              <Text style={styles.garmentPlaceholderSub}>Select a photo of the clothing item you want to try on</Text>
+              <Text style={styles.garmentPlaceholderNote}>Clothing items only — no person photos</Text>
             </TouchableOpacity>
           )}
+        </View>
+
+        {/* Secondary garment sources */}
+        <View style={styles.garmentActionsRow}>
+          <TouchableOpacity
+            style={[styles.linkImportBtn, isImportingUrl && { opacity: 0.6 }]}
+            onPress={importFromUrl}
+            disabled={isImportingUrl}
+          >
+            {isImportingUrl
+              ? <ActivityIndicator size="small" color="#d0e8f8" />
+              : <Text style={styles.linkImportText}>🔗 Paste product link</Text>
+            }
+          </TouchableOpacity>
+          {showDemoChip && !garmentUri && (
+            <TouchableOpacity style={styles.demoChip} onPress={tryDemoGarment}>
+              <Text style={styles.demoChipText}>✨ Try a sample garment</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {/* Garment category — mandatory explicit choice */}
+        {garmentUri && (
+          <>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Garment Type</Text>
+              {!garmentCategory && <Text style={styles.categoryRequired}>Required</Text>}
+            </View>
+            <View style={styles.categoryRow}>
+              {CATEGORY_OPTIONS.map(opt => {
+                const isActive = garmentCategory === opt.value;
+                return (
+                  <TouchableOpacity
+                    key={opt.value}
+                    style={[styles.categoryChip, isActive && styles.categoryChipActive]}
+                    onPress={() => setGarmentCategory(opt.value)}
+                  >
+                    <Text style={[styles.categoryChipText, isActive && styles.categoryChipTextActive]}>
+                      {opt.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </>
+        )}
+
+        {/* Quality mode */}
+        <View style={styles.qualityRow}>
+          <TouchableOpacity
+            style={[styles.qualityChip, qualityMode === 'balanced' && styles.qualityChipActive]}
+            onPress={() => selectQualityMode('balanced')}
+          >
+            <Text style={[styles.qualityChipText, qualityMode === 'balanced' && styles.qualityChipTextActive]}>
+              Standard
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.qualityChip, qualityMode === 'quality' && styles.qualityChipActive]}
+            onPress={() => selectQualityMode('quality')}
+          >
+            <Text style={[styles.qualityChipText, qualityMode === 'quality' && styles.qualityChipTextActive]}>
+              High Quality ✨
+            </Text>
+          </TouchableOpacity>
         </View>
 
         {/* Generate */}
@@ -526,11 +768,12 @@ export default function Home() {
           onPress={handleGeneratePress}
           disabled={!canGenerate}
         >
-          <Text style={styles.primaryBtnText}>🤖  Generate Try-On</Text>
+          <Text style={styles.primaryBtnText}>🤖  Preview My Outfit</Text>
         </TouchableOpacity>
 
         {!selectedPhoto && <Text style={styles.hintText}>Add or select a photo above to continue</Text>}
         {selectedPhoto && !garmentUri && <Text style={styles.hintText}>Choose a garment to continue</Text>}
+        {selectedPhoto && garmentUri && !garmentCategory && <Text style={styles.hintText}>Select the garment type to continue</Text>}
         {isGenerating && (
           <View style={styles.loadingBox}>
             <ActivityIndicator size="large" color="#ffffff" />
@@ -646,14 +889,55 @@ const styles = StyleSheet.create({
   garmentPlaceholderEmoji: { fontSize: 44 },
   garmentPlaceholderText: { color: '#c0d8f0', fontSize: 15, fontWeight: '600' },
   garmentPlaceholderSub: { color: '#4a80a8', fontSize: 12 },
+  garmentPlaceholderNote: { color: '#2a5a3a', fontSize: 11, fontWeight: '600', marginTop: 4 },
   changeOverlay: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
     backgroundColor: 'rgba(0,0,0,0.65)', padding: 12, alignItems: 'center',
   },
   changeText: { color: '#fff', fontSize: 13, fontWeight: '600' },
 
+  garmentActionsRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 10, marginTop: 12, paddingHorizontal: 16, flexWrap: 'wrap',
+  },
+  linkImportBtn: {
+    backgroundColor: '#1e2a38', borderRadius: 100, borderWidth: 1, borderColor: '#2e4a66',
+    paddingHorizontal: 14, paddingVertical: 9, minWidth: 160, alignItems: 'center',
+  },
+  linkImportText: { color: '#d0e8f8', fontSize: 12, fontWeight: '600' },
+  demoChip: {
+    backgroundColor: 'rgba(74,144,208,0.12)', borderRadius: 100,
+    borderWidth: 1, borderColor: 'rgba(74,144,208,0.35)',
+    paddingHorizontal: 14, paddingVertical: 9,
+  },
+  demoChipText: { color: '#7eb8d6', fontSize: 12, fontWeight: '600' },
+
+  categoryRequired: { color: '#d08a4a', fontSize: 11, fontWeight: '600' },
+  categoryRow: {
+    flexDirection: 'row', gap: 10, paddingHorizontal: 16,
+  },
+  categoryChip: {
+    flex: 1, paddingVertical: 12, borderRadius: 100, alignItems: 'center',
+    backgroundColor: '#10151c', borderWidth: 1, borderColor: '#2e4a66',
+  },
+  categoryChipActive: { backgroundColor: '#ffffff', borderColor: '#ffffff' },
+  categoryChipText: { color: '#8fb4d8', fontSize: 13, fontWeight: '600' },
+  categoryChipTextActive: { color: '#000000', fontWeight: 'bold' },
+
+  qualityRow: {
+    flexDirection: 'row', gap: 10, paddingHorizontal: 16, marginTop: 16,
+    justifyContent: 'center',
+  },
+  qualityChip: {
+    paddingHorizontal: 16, paddingVertical: 8, borderRadius: 100,
+    backgroundColor: 'transparent', borderWidth: 1, borderColor: '#2e2e2e',
+  },
+  qualityChipActive: { borderColor: '#4a90d0', backgroundColor: 'rgba(74,144,208,0.12)' },
+  qualityChipText: { color: '#666', fontSize: 12, fontWeight: '600' },
+  qualityChipTextActive: { color: '#7eb8d6' },
+
   primaryBtn: {
-    backgroundColor: '#ffffff', marginHorizontal: 16, marginTop: 20,
+    backgroundColor: '#ffffff', marginHorizontal: 16, marginTop: 16,
     padding: 20, borderRadius: 100, alignItems: 'center',
   },
   primaryBtnText: { color: '#000', fontSize: 17, fontWeight: 'bold' },
@@ -662,7 +946,6 @@ const styles = StyleSheet.create({
   loadingBox: { marginTop: 36, alignItems: 'center', paddingHorizontal: 30 },
   loadingTitle: { color: '#fff', fontSize: 17, fontWeight: 'bold', marginTop: 18, marginBottom: 8 },
   loadingSubtitle: { color: '#888', fontSize: 14, textAlign: 'center', lineHeight: 20 },
-  loadingSignature: { color: '#c0392b', fontSize: 11, textAlign: 'center', marginTop: 14, fontStyle: 'italic', letterSpacing: 0.3 },
 
   resultTopRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
@@ -687,14 +970,6 @@ const styles = StyleSheet.create({
   tr: { top: 14, right: 14, borderTopWidth: T, borderRightWidth: T, borderTopRightRadius: 5 },
   bl: { bottom: 14, left: 14, borderBottomWidth: T, borderLeftWidth: T, borderBottomLeftRadius: 5 },
   br: { bottom: 14, right: 14, borderBottomWidth: T, borderRightWidth: T, borderBottomRightRadius: 5 },
-  scanLine: { position: 'absolute', left: 0, right: 0, height: 1.5, backgroundColor: 'rgba(255,255,255,0.18)', zIndex: 5 },
-  arFitBadge: {
-    position: 'absolute', bottom: 14, left: 14,
-    backgroundColor: 'rgba(34,197,94,0.12)', borderWidth: 1,
-    borderColor: 'rgba(34,197,94,0.35)', borderRadius: 100,
-    paddingHorizontal: 12, paddingVertical: 5, zIndex: 10,
-  },
-  arFitText: { color: '#22c55e', fontSize: 11, fontWeight: '700', letterSpacing: 1 },
 
   saveLibraryBtn: {
     marginHorizontal: 16, marginTop: 12, padding: 18, borderRadius: 100,
